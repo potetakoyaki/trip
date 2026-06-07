@@ -68,6 +68,15 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
 
   const plan = await generatePlan(env, events, body, { hotels: realHotels });
 
+  // スポットが1件も組み込めなかった場合は、情報取得に失敗している可能性が高い。
+  // 空のプランを「成功」として返さず、明確なエラーにする。
+  const itemCount = plan.days.reduce((n, d) => n + d.items.length, 0);
+  if (itemCount === 0) {
+    throw new Error(
+      'スポット情報を取得できませんでした（情報元のAPIエラー、またはこのエリアの情報が少ない可能性があります）。エリア名をもう少し具体的にするか、時間をおいて再度お試しください。',
+    );
+  }
+
   // 旅行日の天気予報（無料・キー不要）。取得できたら付与。
   try {
     const forecast = await fetchForecast(body.area ?? '', body.startDate, body.endDate);

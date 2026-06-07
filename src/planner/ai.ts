@@ -177,9 +177,13 @@ export async function generateAiPlan(
     })) as { response?: unknown };
   } catch (e) {
     // 無料枠（トークン/ニューロン）切れ・利用上限のときは、弱いルールベースに退避せず
-    // 明確なエラーとして上位（ジョブ）へ返す。それ以外の一時的エラーは従来通り退避。
+    // 明確なエラーとして上位（ジョブ）へ返す。
     if (isAiLimitError(e)) throw new AiQuotaError();
-    return generateRulePlan(events, req);
+    // それ以外のAI APIエラーも隠さず、プラン作成の失敗として上位へ返す。
+    throw new Error(
+      'AIでのプラン生成に失敗しました（時間をおいて再度お試しください）。詳細: ' +
+        (e instanceof Error ? e.message : String(e)),
+    );
   }
 
   try {
