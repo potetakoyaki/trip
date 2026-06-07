@@ -10,6 +10,8 @@ export interface Env {
   CONNPASS_API_KEY?: string;
   /** Brave Search API キー（任意）。自動収集の検索を安定化する。 */
   BRAVE_API_KEY?: string;
+  /** Jina API キー（任意・カード不要の無料キーで上限アップ）。 */
+  JINA_API_KEY?: string;
 }
 
 /** スクレイパが返す正規化済みイベント（DB保存前）。 */

@@ -12,20 +12,17 @@ export interface DiscoverResult {
   note?: string;
 }
 
-const MAX_PAGES = 4; // 1エリアあたりに読む大手サイト/ブログのページ数
+const MAX_PAGES = 4; // 1エリアあたりに扱う大手サイト/ブログのページ数
 
-// 自動収集は一般サイト/検索を相手にするため、通常のブラウザとして振る舞う
-// （bot 用UAだと空ページやブロックを返されやすいため）。レート制限は維持。
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 /**
- * ユーザーがソースを登録しなくても、エリア名から自動で情報源を集めて
- * AI で旅行スポットを抽出・保存する（「サイトはアプリが自動で決める」動作）。
+ * エリア名から自動で情報源を集め、AI で旅行スポットを抽出・保存する。
  *
- * Web検索で「<エリア> 観光 おすすめ」等を引き、上位の大手旅行サイト・ブログ記事を
- * 数件スクレイピングして Workers AI で構造化する。
- * 検索は Brave API（キーがあれば最優先・確実）→ Bing → DuckDuckGo の順で試す。
+ * 主軸は Jina（s.jina.ai 検索 / r.jina.ai 本文取得）。エージェント向けサービスで
+ * サーバーIPからでも動作し、サイト側のbotブロックを回避しやすい。キー不要（任意の
+ * 無料キーで上限アップ・カード不要）。失敗時は Brave/Bing/DuckDuckGo にフォールバック。
  */
 export async function discoverAndScrape(
   env: Env,
@@ -37,49 +34,57 @@ export async function discoverAndScrape(
   if (!env.AI) return { ...empty, note: 'Workers AI(env.AI) が無効です' };
 
   const http = new HttpClient({ userAgent: BROWSER_UA });
+  const queries = buildQueries(area, opts.interests);
 
-  // 1) 検索で候補URLを集める
-  let candidates: string[] = [];
+  const docs: { source: string; url: string; text: string }[] = [];
   let engine: string | null = null;
-  for (const q of buildQueries(area, opts.interests)) {
-    const r = await searchWeb(http, env, q);
-    if (r.urls.length) {
-      engine = r.engine;
-      for (const u of r.urls) if (!candidates.includes(u)) candidates.push(u);
+  let candidates = 0;
+
+  // 1) Jina 検索（検索＋本文取得を一度に。キー不要・サーバーIPで動作）
+  for (const q of queries) {
+    if (docs.length >= MAX_PAGES) break;
+    const results = await jinaSearch(http, env, q);
+    if (results.length) {
+      engine = 'jina';
+      candidates += results.length;
+      pushDocs(docs, results);
     }
-    if (candidates.length >= 12) break;
   }
 
-  if (!candidates.length) {
+  // 2) フォールバック: 他検索でURLを発見 → Jina Reader/直接で本文取得
+  if (!docs.length) {
+    const urls: string[] = [];
+    for (const q of queries) {
+      const s = await searchWeb(http, env, q);
+      if (s.urls.length) {
+        engine = s.engine;
+        for (const u of s.urls) if (!urls.includes(u)) urls.push(u);
+      }
+      if (urls.length >= 12) break;
+    }
+    candidates = urls.length;
+    const seenHost = new Set<string>();
+    for (const url of urls) {
+      if (docs.length >= MAX_PAGES) break;
+      const h = hostOf(url);
+      if (!h || isExcludedHost(h) || seenHost.has(h)) continue;
+      seenHost.add(h);
+      const text = await readPage(http, env, url);
+      if (text.length > 300) docs.push({ source: `web:${h}`, url, text });
+    }
+  }
+
+  if (!docs.length) {
     return {
       ...empty,
-      note: '検索結果を取得できませんでした（検索エンジンがサーバーからのアクセスをブロックしている可能性）。Brave Search API キーの設定を推奨します。',
+      stats: { candidates, fetched: 0, engine },
+      note: candidates
+        ? '検索はできたが、ページ本文を取得できませんでした。'
+        : '検索結果を取得できませんでした（検索サービスに到達できていない可能性）。',
     };
   }
 
-  // 2) 上位候補を、ホスト重複を避けつつ本文取得
-  const docs: { source: string; url: string; text: string }[] = [];
-  const seenHost = new Set<string>();
-  for (const link of candidates) {
-    if (docs.length >= MAX_PAGES) break;
-    let host: string;
-    try {
-      host = new URL(link).host;
-    } catch {
-      continue;
-    }
-    if (isExcludedHost(host) || seenHost.has(host)) continue;
-    seenHost.add(host);
-    try {
-      const html = await http.getText(link, { skipRobots: true });
-      const text = extractReadableText(html);
-      if (text.length > 300) docs.push({ source: `web:${host}`, url: link, text });
-    } catch {
-      /* この記事はスキップ */
-    }
-  }
-
-  // 3) AI で旅行スポットを抽出して保存
+  // 3) AI でスポット抽出して保存
   const scrapedAt = new Date().toISOString();
   let total = 0;
   for (const doc of docs) {
@@ -96,31 +101,76 @@ export async function discoverAndScrape(
           url: doc.url,
           category: s.category || inferCategory(title, s.description) || '観光',
           prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
-          city: s.city || area, // エリアで確実に引っかかるように
+          city: s.city || area,
           raw: { from: doc.source, area },
         });
       }
       total += await upsertEvents(env.DB, doc.source, events, scrapedAt);
     } catch {
-      /* 1ページの抽出失敗は無視して次へ */
+      /* 1ページの抽出失敗は無視 */
     }
   }
 
-  const stats = { candidates: candidates.length, fetched: docs.length, engine };
-  let note: string | undefined;
-  if (docs.length === 0) note = '検索はできたが、ページ本文を取得できませんでした（各サイトがブロックしている可能性）。';
-  else if (total === 0) note = 'ページは取得できたが、AIがスポットを抽出できませんでした。';
-
-  return { total, docs: docs.map((d) => ({ source: d.source, url: d.url })), stats, note };
+  return {
+    total,
+    docs: docs.map((d) => ({ source: d.source, url: d.url })),
+    stats: { candidates, fetched: docs.length, engine },
+    note: total === 0 ? 'ページは取得できたが、AIがスポットを抽出できませんでした。' : undefined,
+  };
 }
 
-/** 検索: Brave API（キーがあれば）→ Bing → DuckDuckGo の順に試す。 */
+/** Jina 検索（s.jina.ai）。検索結果に本文content付きで返る。 */
+async function jinaSearch(
+  http: HttpClient,
+  env: Env,
+  query: string,
+): Promise<{ url: string; text: string }[]> {
+  try {
+    const headers: Record<string, string> = { Accept: 'application/json', 'X-Retain-Images': 'none' };
+    if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
+    const json = await http.getJson<any>(`https://s.jina.ai/?q=${encodeURIComponent(query)}`, {
+      skipRobots: true,
+      headers,
+    });
+    const data = Array.isArray(json?.data) ? json.data : [];
+    const out: { url: string; text: string }[] = [];
+    for (const r of data) {
+      const url = r?.url;
+      const text = r?.content || r?.description;
+      if (typeof url === 'string' && typeof text === 'string' && text.length > 200) {
+        out.push({ url, text });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** ページ本文取得: Jina Reader(r.jina.ai)優先（botブロック回避）→ 直接取得。 */
+async function readPage(http: HttpClient, env: Env, url: string): Promise<string> {
+  try {
+    const headers: Record<string, string> = {};
+    if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
+    const md = await http.getText(`https://r.jina.ai/${url}`, { skipRobots: true, headers });
+    if (md && md.length > 300) return md;
+  } catch {
+    /* 直接取得にフォールバック */
+  }
+  try {
+    const html = await http.getText(url, { skipRobots: true });
+    return extractReadableText(html);
+  } catch {
+    return '';
+  }
+}
+
+/** Brave API（キーがあれば）→ Bing → DuckDuckGo の順でURL候補を得る。 */
 async function searchWeb(
   http: HttpClient,
   env: Env,
   query: string,
 ): Promise<{ urls: string[]; engine: string | null }> {
-  // Brave Search API（キーがあれば最優先・最も確実）
   if (env.BRAVE_API_KEY) {
     try {
       const json = await http.getJson<any>(
@@ -133,8 +183,6 @@ async function searchWeb(
       /* フォールバック */
     }
   }
-
-  // Bing（サーバーIPに比較的寛容）
   try {
     const html = await http.getText(`https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=ja`, {
       skipRobots: true,
@@ -144,8 +192,6 @@ async function searchWeb(
   } catch {
     /* フォールバック */
   }
-
-  // DuckDuckGo（html / lite）
   for (const [url, eng] of [
     [`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, 'ddg-html'],
     [`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, 'ddg-lite'],
@@ -158,12 +204,32 @@ async function searchWeb(
       /* 次へ */
     }
   }
-
   return { urls: [], engine: null };
 }
 
+function pushDocs(
+  docs: { source: string; url: string; text: string }[],
+  results: { url: string; text: string }[],
+): void {
+  for (const r of results) {
+    if (docs.length >= MAX_PAGES) break;
+    const h = hostOf(r.url);
+    if (!h || isExcludedHost(h)) continue;
+    if (docs.some((d) => hostOf(d.url) === h)) continue; // 同一ホストは1件まで
+    docs.push({ source: `web:${h}`, url: r.url, text: r.text });
+  }
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
 function isExcludedHost(host: string): boolean {
-  return /duckduckgo\.com|google\.|bing\.com|yahoo\.co|youtube\.com|wikipedia\.org|wikivoyage\.org|facebook\.com|twitter\.com|x\.com|instagram\.com|amazon\.|pinterest\./i.test(
+  return /duckduckgo\.com|google\.|bing\.com|yahoo\.co|youtube\.com|wikipedia\.org|wikivoyage\.org|facebook\.com|twitter\.com|x\.com|instagram\.com|amazon\.|pinterest\.|jina\.ai/i.test(
     host,
   );
 }
