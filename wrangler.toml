@@ -1,4 +1,4 @@
-name = "trip-planner"
+name = "trip"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 
@@ -11,7 +11,7 @@ directory = "./public"
 [[d1_databases]]
 binding = "DB"
 database_name = "trip"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "6a1f49ca-9a8f-4a71-a9e9-4c4837d39cf5"
 migrations_dir = "migrations"
 
 # 定期スクレイピング（6時間ごと）。不要なら削除可。

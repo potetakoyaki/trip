@@ -7,6 +7,12 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.route('/api', api);
 
+// 想定外の例外も「HTTP 500」で潰さず、原因メッセージをJSONで返す。
+app.onError((err, c) => {
+  console.error('Unhandled error:', err);
+  return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+});
+
 // /api 以外で Worker に届いたパス（静的アセットに無いもの）への 404。
 app.notFound((c) => c.json({ error: 'not found' }, 404));
 
