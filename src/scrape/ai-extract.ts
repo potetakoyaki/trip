@@ -1,7 +1,8 @@
 import type { Env } from '../types';
 
-// 抽出は指示追従が強いモデルを使う。失敗時は軽量モデルにフォールバック。
-const EXTRACT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// 抽出は無料枠を節約するため軽量モデルを使う。JSONモード(schema強制)により
+// 8bでも構造化出力は安定する。失敗時も同モデルの素のJSON出力で再試行。
+const EXTRACT_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 const FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
 export interface Spot {
