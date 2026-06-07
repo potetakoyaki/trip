@@ -9,13 +9,17 @@ import {
   createPlanJob,
   createSource,
   deleteSource,
+  ensureCoveredTable,
   ensureJobsTable,
   ensurePlanJobs,
+  getCollectedAreas,
   getJob,
   getPlan,
   getPlanJob,
   getSources,
   insertDemoEvents,
+  isCovered,
+  markCovered,
   searchEvents,
   startJob,
   updateSource,
@@ -252,8 +256,10 @@ api.post('/collect/start', async (c) => {
   const keyword = str(raw?.keyword, 80);
   const interests = strArr(raw?.interests);
   await ensureJobsTable(c.env.DB);
+  await ensureCoveredTable(c.env.DB);
+  const now = new Date().toISOString();
+  const kw = keyword ?? '';
 
-  // 無駄なAI消費を防ぐ: 既に収集中 / 収集済みのエリアは再収集させない。
   const existing = await getJob(c.env.DB, area);
   const existingCount = (await searchEvents(c.env.DB, { area, limit: 60 })).length;
   if (existing && existing.status === 'pending') {
@@ -264,7 +270,33 @@ api.post('/collect/start', async (c) => {
       message: `「${area}」は既に収集中です。完了までお待ちください。`,
     });
   }
-  if ((existing && existing.status === 'done') || existingCount >= 15) {
+
+  const collected = (existing && existing.status === 'done') || existingCount >= 15;
+  if (collected) {
+    // 条件（キーワード）が増えていたら、その差分だけを追加収集する。
+    if (keyword && !(await isCovered(c.env.DB, area, kw))) {
+      let added = 0;
+      try {
+        const r = await discoverAndScrape(c.env, {
+          area,
+          queries: [`${area} ${keyword}`, `${area} ${keyword} おすすめ スポット`],
+          maxPages: 4,
+        });
+        added = r.total;
+      } catch {
+        /* 差分収集失敗は無視 */
+      }
+      await markCovered(c.env.DB, area, kw, now);
+      const total = (await searchEvents(c.env.DB, { area, limit: 500 })).length;
+      return c.json({
+        ok: true,
+        delta: true,
+        added,
+        total,
+        message: `「${keyword}」の追加分を収集しました（合計 ${total} 件）。`,
+      });
+    }
+    // 新しい条件が無ければ再収集しない。
     return c.json({
       ok: false,
       reason: 'collected',
@@ -273,11 +305,30 @@ api.post('/collect/start', async (c) => {
     });
   }
 
+  // 未収集 → フル収集（バックグラウンド）。
   const { totalRounds } = roundQueries(area, 1, keyword);
-  await startJob(c.env.DB, { area, keyword, interests, totalRounds, now: new Date().toISOString() });
-  // 最初の1ラウンドはこのリクエストのバックグラウンドで即実行（待たずに返す）。
+  await startJob(c.env.DB, { area, keyword, interests, totalRounds, now });
+  await markCovered(c.env.DB, area, '', now);
+  if (keyword) await markCovered(c.env.DB, area, kw, now);
   c.executionCtx.waitUntil(processOneRound(c.env, area).catch(() => {}));
   return c.json({ ok: true, area, totalRounds });
+});
+
+// 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
+api.get('/areas/similar', async (c) => {
+  const area = (c.req.query('area') || '').trim();
+  if (!area) return c.json({ match: null });
+  await ensureJobsTable(c.env.DB);
+  const areas = await getCollectedAreas(c.env.DB);
+  let match: string | null = null;
+  for (const a of areas) {
+    if (!a || a === area) continue;
+    if (a.includes(area) || area.includes(a)) {
+      match = a;
+      break;
+    }
+  }
+  return c.json({ match });
 });
 
 // じっくり収集の進捗を取得する。

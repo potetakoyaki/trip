@@ -173,16 +173,38 @@ function showProgress(doneRounds, totalRounds, collected, done) {
   $('cp-count').textContent = `合計 ${collected} 件`;
 }
 
+// 入力エリアに似た収集済みエリアがあれば「同じ？」と確認し、同じなら過去データを使う。
+async function resolveArea(area) {
+  if (!area) return area;
+  try {
+    const r = await api('/areas/similar?area=' + encodeURIComponent(area));
+    if (r.match && r.match !== area) {
+      const same = confirm(
+        `「${r.match}」と同じ場所ですか？\n\n同じなら、過去に収集したデータを使います（収集の手間とAI消費を節約できます）。`,
+      );
+      if (same) {
+        $('area').value = r.match;
+        return r.match;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return area;
+}
+
 async function deepCollect() {
-  const area = $('area').value.trim();
+  let area = $('area').value.trim();
   if (!area) {
     setStatus('エリア・行き先を入力してください。', 'err');
     $('area').focus();
     return;
   }
   setBusy(true);
+  area = await resolveArea(area);
   const keyword = $('keyword').value.trim() || undefined;
   const interests = [...selectedInterests];
+  showIndet('収集できるか確認中…');
   try {
     const r = await api('/collect/start', {
       method: 'POST',
@@ -191,8 +213,17 @@ async function deepCollect() {
     });
     // 既に収集中／収集済みなら、再収集せずメッセージを出す（AI消費の無駄を防ぐ）。
     if (r.ok === false) {
+      hideProgressBar();
       setBusy(false);
       setStatus(r.message || 'このエリアは既に収集済みです。', r.reason === 'running' ? '' : 'ok');
+      return;
+    }
+    // 条件（キーワード）が増えた分の差分だけ収集した場合。
+    if (r.delta) {
+      showProgress(1, 1, r.total, true);
+      setBusy(false);
+      clearBusy();
+      setStatus(r.message || `追加分を収集しました（合計 ${r.total} 件）。`, 'ok');
       return;
     }
     saveBusy({ type: 'collect', area });
@@ -203,6 +234,7 @@ async function deepCollect() {
     showProgress(0, r.totalRounds, 0, false);
     pollCollect(area);
   } catch (e) {
+    hideProgressBar();
     setBusy(false);
     clearBusy();
     setStatus('開始に失敗: ' + e.message, 'err');
@@ -303,6 +335,7 @@ async function submitPlan(ev) {
   if (!validateForm()) return;
   setBusy(true);
   try {
+    await resolveArea($('area').value.trim());
     const body = buildPlanBody();
     const r = await api('/plan/start', {
       method: 'POST',

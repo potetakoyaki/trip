@@ -158,6 +158,39 @@ export async function updateJobProgress(
     .run();
 }
 
+// 収集済みの (エリア, キーワード) 条件を記録し、差分収集の判定に使う。
+const ENSURE_COVERED_SQL = `CREATE TABLE IF NOT EXISTS collect_covered (
+  area TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (area, keyword)
+)`;
+
+export async function ensureCoveredTable(db: D1Database): Promise<void> {
+  await db.prepare(ENSURE_COVERED_SQL).run();
+}
+
+export async function isCovered(db: D1Database, area: string, keyword: string): Promise<boolean> {
+  const r = await db
+    .prepare('SELECT 1 AS x FROM collect_covered WHERE area = ? AND keyword = ?')
+    .bind(area, keyword)
+    .first();
+  return !!r;
+}
+
+export async function markCovered(db: D1Database, area: string, keyword: string, now: string): Promise<void> {
+  await db
+    .prepare('INSERT OR IGNORE INTO collect_covered (area, keyword, created_at) VALUES (?,?,?)')
+    .bind(area, keyword, now)
+    .run();
+}
+
+/** じっくり収集したエリア名の一覧（似たエリア名の判定に使う）。 */
+export async function getCollectedAreas(db: D1Database): Promise<string[]> {
+  const { results } = await db.prepare('SELECT area FROM collect_jobs').all();
+  return (results as any[]).map((r) => String(r.area)).filter(Boolean);
+}
+
 // ---- プラン作成のバックグラウンドジョブ ----
 
 const ENSURE_PLAN_JOBS_SQL = `CREATE TABLE IF NOT EXISTS plan_jobs (
