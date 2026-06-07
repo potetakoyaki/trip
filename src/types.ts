@@ -116,6 +116,10 @@ export interface PlanItem {
   alt?: string;
   /** その場所の目安費用（入場料・飲食代など、円）。 */
   estCost?: number;
+  /** おおよその緯度（地図・スポット間の移動時間の概算用）。 */
+  lat?: number;
+  /** おおよその経度。 */
+  lng?: number;
 }
 
 export interface PlanDay {

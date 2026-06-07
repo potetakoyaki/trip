@@ -54,6 +54,8 @@ const SCHEMA = {
                 duration: { type: 'string' },
                 alt: { type: 'string' },
                 estCost: { type: 'number' },
+                lat: { type: 'number' },
+                lng: { type: 'number' },
               },
               required: ['title', 'why', 'tips'],
             },
@@ -128,7 +130,8 @@ export async function generateAiPlan(
     '- days[].theme: その日のねらい',
     '- days[].items[]: title(候補と一致), time(例"10:00"), category,',
     '   why(おすすめ理由を80〜140字), tips(楽しみ方を80〜140字。名物/回り方/ベスト時間帯),',
-    '   access(行き方を一言), duration(滞在目安), alt(代替案), estCost(その場所の目安費用・円の数値。入場料や飲食代。無料は0)。',
+    '   access(行き方を一言), duration(滞在目安), alt(代替案), estCost(その場所の目安費用・円の数値。入場料や飲食代。無料は0),',
+    '   lat,lng(その場所のおおよその緯度・経度の数値。地図表示とスポット間の移動時間の概算に使うので必ず入れる)。',
     '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、tips に名物料理・おすすめメニュー・予算感を具体的に書く（estCostに目安）。',
     '  候補に飲食店が少なければ、そのエリアで評判の料理ジャンルや店を一般知識で提案してよい。',
     '- 観光スポットは候補から選び、同じ場所を重複させない。',
@@ -180,6 +183,8 @@ export async function generateAiPlan(
           duration: cleanStr(it?.duration),
           alt: cleanStr(it?.alt),
           estCost: cleanNum(it?.estCost),
+          lat: rec?.lat ?? cleanCoord(it?.lat),
+          lng: rec?.lng ?? cleanCoord(it?.lng),
         });
       }
       items.sort((a, b) => (a.time ?? '99:99').localeCompare(b.time ?? '99:99'));
@@ -276,6 +281,16 @@ function cleanNum(v: unknown): number | undefined {
   if (typeof v === 'string') {
     const n = Number(v.replace(/[^0-9.]/g, ''));
     return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
+  }
+  return undefined;
+}
+
+/** 緯度経度（小数・負値あり）。移動時間の概算に使うのでそのまま保持する。 */
+function cleanCoord(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    if (Number.isFinite(n) && n !== 0) return n;
   }
   return undefined;
 }

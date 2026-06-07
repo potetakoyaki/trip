@@ -15,20 +15,30 @@
         <button id="drawer-close" class="drawer-close" aria-label="閉じる">✕</button>
       </div>
 
-      <section class="drawer-section">
-        <div class="drawer-sec-head">
-          <h3>📚 保存したプラン</h3>
-          <button type="button" id="history-refresh" class="btn-ghost">更新</button>
+      <details class="drawer-section" id="sec-history">
+        <summary>📚 保存したプラン<span class="sec-count" id="history-count"></span></summary>
+        <div class="drawer-sec-body">
+          <div class="sec-actions">
+            <button type="button" id="history-refresh" class="btn-ghost">更新</button>
+          </div>
+          <div id="history-list" class="history-list"></div>
         </div>
-        <div id="history-list" class="history-list"></div>
-      </section>
+      </details>
 
-      <section class="drawer-section">
-        <div class="drawer-sec-head">
-          <h3>📍 行った場所</h3>
+      <details class="drawer-section" id="sec-wish">
+        <summary>⭐ 行ってみたい<span class="sec-count" id="wish-count"></span></summary>
+        <div class="drawer-sec-body">
+          <p class="sec-hint">↑↓ で行きたい順に並び替えできます。</p>
+          <div id="wishlist-list" class="wishlist-list"></div>
         </div>
-        <div id="visited-tree" class="visited-tree"></div>
-      </section>
+      </details>
+
+      <details class="drawer-section" id="sec-visited">
+        <summary>📍 行った場所<span class="sec-count" id="visited-count"></span></summary>
+        <div class="drawer-sec-body">
+          <div id="visited-tree" class="visited-tree"></div>
+        </div>
+      </details>
     </aside>
     <div id="drawer-overlay" class="drawer-overlay hidden"></div>
 

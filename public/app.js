@@ -3,8 +3,12 @@
 const $ = (id) => document.getElementById(id);
 const selectedInterests = new Set();
 const visitedSet = new Set();
+const wishlistSet = new Set();
+let wishlistRows = [];
 let currentPlanId = null;
 let currentArea = '';
+let currentTransport = '';
+let currentPlan = null;
 
 const CAT_EMOJI = {
   グルメ: '🍜',
@@ -40,7 +44,10 @@ async function loadVisited() {
     const { visited } = await api('/visited');
     visitedSet.clear();
     (visited || []).forEach((v) => visitedSet.add(v.title));
+    const cnt = $('visited-count');
+    if (cnt) cnt.textContent = visited && visited.length ? ` (${visited.length})` : '';
     renderVisitedTree(visited || []);
+    syncSpotChecks();
   } catch {
     /* 任意機能 */
   }
@@ -111,11 +118,194 @@ function openDrawer() {
   $('drawer').classList.remove('hidden');
   $('drawer-overlay').classList.remove('hidden');
   loadHistory();
+  loadWishlist();
   loadVisited();
 }
 function closeDrawer() {
   $('drawer').classList.add('hidden');
   $('drawer-overlay').classList.add('hidden');
+}
+
+// --- 行ってみたい場所（wishlist・並び替え可能） ---
+async function loadWishlist() {
+  try {
+    const { wishlist } = await api('/wishlist');
+    wishlistRows = wishlist || [];
+    wishlistSet.clear();
+    wishlistRows.forEach((w) => wishlistSet.add(w.title));
+    renderWishlist();
+    syncSpotChecks();
+  } catch {
+    /* 任意機能 */
+  }
+}
+
+function renderWishlist() {
+  const el = $('wishlist-list');
+  if (!el) return;
+  const cnt = $('wish-count');
+  if (cnt) cnt.textContent = wishlistRows.length ? ` (${wishlistRows.length})` : '';
+  if (!wishlistRows.length) {
+    el.innerHTML =
+      '<p class="visited-empty">スポットの「⭐行きたい」にチェックすると、ここに行きたい順で並びます。</p>';
+    return;
+  }
+  el.innerHTML = wishlistRows
+    .map((w, i) => {
+      const name = w.url
+        ? `<a href="${esc(w.url)}" target="_blank" rel="noopener">${esc(w.title)}</a>`
+        : esc(w.title);
+      const pref = w.prefecture ? `<span class="wl-pref">${esc(w.prefecture)}</span>` : '';
+      return `<div class="wl-item">
+        <div class="wl-ord">
+          <button type="button" class="wl-up" data-title="${esc(w.title)}" aria-label="上へ" ${i === 0 ? 'disabled' : ''}>▲</button>
+          <button type="button" class="wl-down" data-title="${esc(w.title)}" aria-label="下へ" ${i === wishlistRows.length - 1 ? 'disabled' : ''}>▼</button>
+        </div>
+        <div class="wl-main"><span class="wl-name">${name}</span>${pref}</div>
+        <button type="button" class="wl-remove" data-title="${esc(w.title)}" aria-label="削除">🗑</button>
+      </div>`;
+    })
+    .join('');
+}
+
+async function toggleWishlist(title, on, opts = {}) {
+  if (on) wishlistSet.add(title);
+  else wishlistSet.delete(title);
+  syncSpotChecks();
+  try {
+    await api('/wishlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, wish: on, area: opts.area, prefecture: opts.prefecture, url: opts.url }),
+    });
+  } catch {
+    /* ignore */
+  }
+  loadWishlist();
+}
+
+// ↑↓ で並び替え。画面はその場で更新し、順序をサーバーに保存する。
+async function moveWishlist(title, dir) {
+  const i = wishlistRows.findIndex((r) => r.title === title);
+  if (i < 0) return;
+  const j = i + dir;
+  if (j < 0 || j >= wishlistRows.length) return;
+  [wishlistRows[i], wishlistRows[j]] = [wishlistRows[j], wishlistRows[i]];
+  renderWishlist();
+  try {
+    await api('/wishlist/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ titles: wishlistRows.map((r) => r.title) }),
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+// 画面上の各スポットの「行った/行きたい」チェック状態を、最新の集合に合わせる。
+function syncSpotChecks() {
+  document.querySelectorAll('.visited-cb').forEach((cb) => {
+    cb.checked = visitedSet.has(cb.dataset.title);
+  });
+  document.querySelectorAll('.wish-cb').forEach((cb) => {
+    cb.checked = wishlistSet.has(cb.dataset.title);
+  });
+}
+
+function wishCheckbox(title, prefecture, url) {
+  const checked = wishlistSet.has(title) ? 'checked' : '';
+  return `<label class="wish-check"><input type="checkbox" class="wish-cb" data-title="${esc(title)}" data-pref="${esc(prefecture || '')}" data-url="${esc(url || '')}" ${checked}> ⭐行きたい</label>`;
+}
+
+function spotChecks(title, prefecture, url) {
+  return `<div class="spot-checks">${wishCheckbox(title, prefecture, url)}${visitedCheckbox(title, prefecture, url)}</div>`;
+}
+
+// --- スポット間の移動時間の概算（緯度経度から・並び替えで即再計算） ---
+const MODE_SPEED = { 電車: 30, 新幹線: 45, 車: 30, 飛行機: 40, 高速バス: 28, '': 26 };
+const MODE_ICON = { 電車: '🚃', 新幹線: '🚄', 車: '🚗', 飛行機: '✈️', 高速バス: '🚌' };
+
+function haversineKm(a, b) {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const la1 = toRad(a.lat);
+  const la2 = toRad(b.lat);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+function travelLeg(a, b, mode) {
+  if (!a || !b || a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
+  const km = haversineKm(a, b);
+  if (km < 0.05) return null;
+  if (km < 0.8) {
+    const m = Math.max(2, Math.round((km / 4.5) * 60));
+    return { minutes: m, km: Math.round(km * 10) / 10, label: `徒歩 約${m}分`, icon: '🚶' };
+  }
+  const sp = MODE_SPEED[mode] ?? 26;
+  const m = Math.max(5, Math.round((km / sp) * 60) + 4);
+  return { minutes: m, km: Math.round(km * 10) / 10, label: `${mode || '公共交通'} 約${m}分`, icon: MODE_ICON[mode] || '🧭' };
+}
+
+function parseClock(s) {
+  const m = String(s || '').match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function fmtClock(min) {
+  min = ((Math.round(min) % 1440) + 1440) % 1440;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}:${String(m).padStart(2, '0')}`;
+}
+function parseDurationMin(s) {
+  if (!s) return 60;
+  const str = String(s);
+  let total = 0;
+  let ok = false;
+  const h = str.match(/(\d+(?:\.\d+)?)\s*時間/);
+  if (h) {
+    total += parseFloat(h[1]) * 60;
+    ok = true;
+  }
+  const m = str.match(/(\d+)\s*分/);
+  if (m) {
+    total += parseInt(m[1], 10);
+    ok = true;
+  }
+  if (!ok) {
+    const n = str.match(/(\d+)/);
+    if (n) {
+      total = parseInt(n[1], 10);
+      ok = true;
+    }
+  }
+  return ok && total > 0 ? total : 60;
+}
+
+// 各スポットの開始時刻と、次までの移動を計算する（移動手段は選択値）。
+function computeSchedule(items, mode) {
+  const times = [];
+  const legs = [];
+  let cur = parseClock(items[0] && items[0].time);
+  if (cur == null) cur = 600; // 10:00 既定
+  for (let i = 0; i < items.length; i++) {
+    times[i] = fmtClock(cur);
+    const stay = parseDurationMin(items[i].duration);
+    const leg = i < items.length - 1 ? travelLeg(items[i], items[i + 1], mode) : null;
+    legs[i] = leg;
+    cur += stay + (leg ? leg.minutes : 0);
+  }
+  return { times, legs };
+}
+
+function renderConnector(leg) {
+  if (!leg) return '<div class="move-seg move-unknown">↓</div>';
+  const km = leg.km != null ? `<span class="move-km">約${leg.km}km</span>` : '';
+  return `<div class="move-seg">${leg.icon} 次まで <b>${esc(leg.label)}</b>${km}</div>`;
 }
 
 // --- dates ---
@@ -204,6 +394,7 @@ async function loadSharedPlan(id) {
     fillForm(d.request);
     currentPlanId = d.id;
     currentArea = (d.request && d.request.area) || '';
+    currentTransport = (d.request && d.request.transport) || '';
     renderPlan({ plan: d.result });
     $('share-btn').classList.remove('hidden');
     setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
@@ -526,6 +717,7 @@ async function loadAndRenderSavedPlan(planId) {
   currentPlanId = d.id;
   fillForm(d.request);
   currentArea = (d.request && d.request.area) || '';
+  currentTransport = (d.request && d.request.transport) || '';
   renderPlan({ plan: d.result });
   $('share-btn').classList.remove('hidden');
   const area = d.request && d.request.area;
@@ -559,6 +751,7 @@ async function loadAndRenderSavedPlan(planId) {
 
 function renderPlan(data) {
   const plan = data.plan;
+  currentPlan = plan;
   $('result').classList.remove('hidden');
 
   const theme = plan.theme ? `<div class="plan-theme">${esc(plan.theme)}</div>` : '';
@@ -582,14 +775,79 @@ function renderPlan(data) {
   $('plan-summary').innerHTML = html;
 
   const daysEl = $('plan-days');
-  daysEl.innerHTML = '';
-  plan.days.forEach((day, i) => daysEl.insertAdjacentHTML('beforeend', renderDay(day, i)));
+  daysEl.innerHTML = plan.days
+    .map((day, i) => `<div class="day" data-day="${i}">${renderDayInner(day, i)}</div>`)
+    .join('');
 
   renderCandidates(data.candidates);
 
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// 1日分の中身（見出し＋ルート＋スポット＋移動）を生成。並び替え時の再描画にも使う。
+function renderDayInner(day, i) {
+  const d = new Date(day.date + 'T00:00:00');
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  const dayTheme = day.theme ? `<div class="day-theme">${esc(day.theme)}</div>` : '';
+  const route = dayRouteLink(day.items);
+  let body;
+  if (day.items.length) {
+    const sched = computeSchedule(day.items, currentTransport);
+    body = day.items
+      .map((it, idx) => {
+        const item = renderItem(it, i, idx, day.items.length, sched.times[idx]);
+        const connector = idx < day.items.length - 1 ? renderConnector(sched.legs[idx]) : '';
+        return item + connector;
+      })
+      .join('');
+  } else {
+    body = '<div class="empty-day">この日の候補は見つかりませんでした。条件をゆるめてみてください。</div>';
+  }
+  return `
+    <div class="day-head">
+      <div class="day-num"><small>DAY</small>${i + 1}</div>
+      <div>
+        <div class="day-date">${d.getMonth() + 1}/${d.getDate()}<span>(${wd})</span></div>
+        ${dayTheme}
+      </div>
+    </div>
+    ${route ? `<div class="day-route-wrap">${route}</div>` : ''}
+    <div class="items">${body}</div>`;
+}
+
+// プラン内のスポットを上下に並び替え、その日だけ画面更新なしで再計算する。
+function movePlanItem(dayIndex, idx, dir) {
+  const day = currentPlan && currentPlan.days && currentPlan.days[dayIndex];
+  if (!day) return;
+  const j = idx + dir;
+  if (j < 0 || j >= day.items.length) return;
+  [day.items[idx], day.items[j]] = [day.items[j], day.items[idx]];
+  const el = document.querySelector(`.day[data-day="${dayIndex}"]`);
+  if (el) el.innerHTML = renderDayInner(day, dayIndex);
+}
+
+const CAT_ORDER = ['グルメ', '自然', '歴史', 'アート', '音楽', '体験', '宿泊', '祭り', 'テック', '観光', 'イベント'];
+
+function candCard(c) {
+  const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
+  const cat = c.category ? `<span class="badge">${catEmoji(c.category)} ${esc(c.category)}</span>` : '';
+  const price = c.price != null ? `<span class="item-price">${c.price === 0 ? '無料' : '目安 ' + yen(c.price)}</span>` : '';
+  const loc = c.location ? `<span class="cand-loc">📍 ${esc(c.location)}</span>` : '';
+  const desc = c.description
+    ? `<p class="cand-desc">${esc(c.description)}</p>`
+    : `<p class="cand-desc cand-desc-empty">概要はまだありません。下のリンクで確認できます。</p>`;
+  const links =
+    `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>` +
+    ` <a href="https://www.google.com/search?q=${encodeURIComponent(c.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式</a>` +
+    (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰 情報元</a>` : '');
+  return `<details class="cand">
+    <summary><span class="cand-name">${esc(c.title)}</span>${cat}${price}</summary>
+    <div class="cand-body">${loc}${desc}<div class="cand-links">${links}</div>
+      <div class="item-foot">${spotChecks(c.title, c.prefecture, c.url)}</div></div>
+  </details>`;
+}
+
+// 見つかったスポットをカテゴリーの大きな括りで表示し、タップで一覧を展開する。
 function renderCandidates(candidates) {
   const el = $('plan-extra');
   if (!el) return;
@@ -597,27 +855,26 @@ function renderCandidates(candidates) {
     el.innerHTML = '';
     return;
   }
-  const items = candidates
-    .map((c) => {
-      const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
-      const cat = c.category ? `<span class="badge">${catEmoji(c.category)} ${esc(c.category)}</span>` : '';
-      const price = c.price != null ? `<span class="item-price">${c.price === 0 ? '無料' : '目安 ' + yen(c.price)}</span>` : '';
-      const loc = c.location ? `<span class="cand-loc">📍 ${esc(c.location)}</span>` : '';
-      const desc = c.description
-        ? `<p class="cand-desc">${esc(c.description)}</p>`
-        : `<p class="cand-desc cand-desc-empty">概要はまだありません。下のリンクで確認できます。</p>`;
-      const links =
-        `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>` +
-        ` <a href="https://www.google.com/search?q=${encodeURIComponent(c.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式</a>` +
-        (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰 情報元</a>` : '');
-      return `<details class="cand">
-        <summary><span class="cand-name">${esc(c.title)}</span>${cat}${price}</summary>
-        <div class="cand-body">${loc}${desc}<div class="cand-links">${links}</div>
-          <div class="item-foot">${visitedCheckbox(c.title, c.prefecture, c.url)}</div></div>
+  const groups = {};
+  candidates.forEach((c) => {
+    const k = c.category || 'その他';
+    (groups[k] = groups[k] || []).push(c);
+  });
+  const keys = Object.keys(groups).sort((a, b) => {
+    const ia = CAT_ORDER.indexOf(a);
+    const ib = CAT_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
+  });
+  const groupHtml = keys
+    .map((k) => {
+      const cards = groups[k].map(candCard).join('');
+      return `<details class="cat-group">
+        <summary><span class="cat-name">${catEmoji(k)} ${esc(k)}</span><span class="cat-count">${groups[k].length}</span></summary>
+        <div class="cand-list">${cards}</div>
       </details>`;
     })
     .join('');
-  el.innerHTML = `<details class="cand-box" open><summary>🔎 見つかったスポット一覧（${candidates.length}件・タップで概要）</summary><div class="cand-list">${items}</div></details>`;
+  el.innerHTML = `<div class="cand-head">🔎 見つかったスポット（${candidates.length}件・カテゴリーをタップで展開）</div><div class="cat-groups">${groupHtml}</div>`;
 }
 
 const yen = (n) => '¥' + Number(n || 0).toLocaleString();
@@ -700,28 +957,6 @@ function dayRouteLink(items) {
   return `<a class="day-route" href="${url}" target="_blank" rel="noopener">🗺 この日のルートを地図で見る</a>`;
 }
 
-function renderDay(day, i) {
-  const d = new Date(day.date + 'T00:00:00');
-  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
-  const dayTheme = day.theme ? `<div class="day-theme">${esc(day.theme)}</div>` : '';
-  const route = dayRouteLink(day.items);
-  const items = day.items.length
-    ? day.items.map(renderItem).join('')
-    : '<div class="empty-day">この日の候補は見つかりませんでした。条件をゆるめてみてください。</div>';
-  return `
-    <div class="day">
-      <div class="day-head">
-        <div class="day-num"><small>DAY</small>${i + 1}</div>
-        <div>
-          <div class="day-date">${d.getMonth() + 1}/${d.getDate()}<span>(${wd})</span></div>
-          ${dayTheme}
-        </div>
-      </div>
-      ${route ? `<div class="day-route-wrap">${route}</div>` : ''}
-      <div class="items">${items}</div>
-    </div>`;
-}
-
 function renderForecast(fc) {
   const days = fc
     .map((day) => {
@@ -750,6 +985,8 @@ async function loadHistory() {
   if (!list) return;
   try {
     const { plans } = await api('/plans');
+    const cnt = $('history-count');
+    if (cnt) cnt.textContent = plans && plans.length ? ` (${plans.length})` : '';
     if (!plans || !plans.length) {
       list.innerHTML =
         '<p class="visited-empty">まだ保存されたプランはありません。プランを作成すると、ここに履歴がたまります。</p>';
@@ -775,7 +1012,7 @@ async function loadHistory() {
 }
 
 async function deleteSavedPlan(id) {
-  if (!confirm('この保存プランを削除しますか？')) return;
+  if (!confirm('この保存プランを一覧から消しますか？（データは残るので共有リンクからは見られます）')) return;
   try {
     await api('/plan/' + encodeURIComponent(id), { method: 'DELETE' });
     loadHistory();
@@ -784,10 +1021,14 @@ async function deleteSavedPlan(id) {
   }
 }
 
-function renderItem(it) {
-  const time = it.time
-    ? `<span class="item-time">${esc(it.time)}</span>`
-    : `<span class="item-time tba">時間自由</span>`;
+function renderItem(it, dayIndex, idx, count, clock) {
+  const t = clock || it.time;
+  const time = t ? `<span class="item-time">${esc(t)}</span>` : `<span class="item-time tba">時間自由</span>`;
+
+  const move = `<span class="item-move">
+    <button type="button" class="mv-up" data-day="${dayIndex}" data-idx="${idx}" aria-label="上へ" ${idx === 0 ? 'disabled' : ''}>▲</button>
+    <button type="button" class="mv-down" data-day="${dayIndex}" data-idx="${idx}" aria-label="下へ" ${idx === count - 1 ? 'disabled' : ''}>▼</button>
+  </span>`;
 
   const meta = [];
   if (it.category) meta.push(`<span class="badge">${catEmoji(it.category)} ${esc(it.category)}</span>`);
@@ -813,13 +1054,13 @@ function renderItem(it) {
 
   return `
     <div class="item">
-      <div class="item-top">${time}<span class="item-title">${esc(it.title)}</span></div>
+      <div class="item-top">${time}<span class="item-title">${esc(it.title)}</span>${move}</div>
       ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
       ${detail.join('')}
       ${sub.length ? `<div class="item-sub">${sub.join('　·　')}</div>` : ''}
       <div class="item-foot">
         <div class="item-links">${links.join('')}</div>
-        ${visitedCheckbox(it.title, it.prefecture, it.url)}
+        ${spotChecks(it.title, it.prefecture, it.url)}
       </div>
     </div>`;
 }
@@ -870,15 +1111,35 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (rm && rm.dataset.title) toggleVisited(rm.dataset.title, false);
   });
 
-  // スポット一覧・プラン内の「行った」チェック（イベント委譲）。
+  // 行ってみたいリストの並び替え（↑↓）・削除。
+  $('wishlist-list').addEventListener('click', (ev) => {
+    const up = ev.target.closest('.wl-up');
+    if (up) return moveWishlist(up.dataset.title, -1);
+    const down = ev.target.closest('.wl-down');
+    if (down) return moveWishlist(down.dataset.title, 1);
+    const rm = ev.target.closest('.wl-remove');
+    if (rm) toggleWishlist(rm.dataset.title, false);
+  });
+
+  // プラン内スポットの並び替え（↑↓・画面更新なしで移動時間を再計算）。
+  $('plan-days').addEventListener('click', (ev) => {
+    const up = ev.target.closest('.mv-up');
+    if (up) return movePlanItem(Number(up.dataset.day), Number(up.dataset.idx), -1);
+    const down = ev.target.closest('.mv-down');
+    if (down) movePlanItem(Number(down.dataset.day), Number(down.dataset.idx), 1);
+  });
+
+  // スポットの「行った」「行きたい」チェック（イベント委譲）。
   document.addEventListener('change', (ev) => {
-    const cb = ev.target.closest('.visited-cb');
-    if (!cb) return;
-    toggleVisited(cb.dataset.title, cb.checked, {
-      area: currentArea,
-      prefecture: cb.dataset.pref,
-      url: cb.dataset.url,
-    });
+    const v = ev.target.closest('.visited-cb');
+    if (v) {
+      toggleVisited(v.dataset.title, v.checked, { area: currentArea, prefecture: v.dataset.pref, url: v.dataset.url });
+      return;
+    }
+    const w = ev.target.closest('.wish-cb');
+    if (w) {
+      toggleWishlist(w.dataset.title, w.checked, { area: currentArea, prefecture: w.dataset.pref, url: w.dataset.url });
+    }
   });
 
   $('startDate').addEventListener('change', () => {
@@ -887,6 +1148,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 
   loadHistory();
+  loadWishlist();
   loadVisited();
 
   const sharedId = new URLSearchParams(location.search).get('plan');

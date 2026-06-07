@@ -242,6 +242,64 @@ export async function findEventPrefecture(db: D1Database, title: string): Promis
   return r?.prefecture ?? null;
 }
 
+// ---- 行ってみたい場所（wishlist。手動で並び替え可能） ----
+
+const ENSURE_WISHLIST_SQL = `CREATE TABLE IF NOT EXISTS wishlist (
+  title TEXT PRIMARY KEY,
+  prefecture TEXT,
+  area TEXT,
+  url TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+)`;
+
+export interface WishlistRow {
+  title: string;
+  prefecture: string | null;
+  area: string | null;
+  url: string | null;
+  sort_order: number;
+}
+
+export async function ensureWishlist(db: D1Database): Promise<void> {
+  await db.prepare(ENSURE_WISHLIST_SQL).run();
+}
+
+export async function addWishlist(
+  db: D1Database,
+  w: { title: string; prefecture?: string; area?: string; url?: string; now: string },
+): Promise<void> {
+  // 末尾に追加。既存なら情報だけ更新し、並び順は維持する。
+  const max = await db.prepare('SELECT MAX(sort_order) AS m FROM wishlist').first<{ m: number | null }>();
+  const next = (max?.m ?? 0) + 1;
+  await db
+    .prepare(
+      `INSERT INTO wishlist (title, prefecture, area, url, sort_order, created_at)
+       VALUES (?,?,?,?,?,?)
+       ON CONFLICT(title) DO UPDATE SET prefecture=excluded.prefecture, area=excluded.area, url=excluded.url`,
+    )
+    .bind(w.title, w.prefecture ?? null, w.area ?? null, w.url ?? null, next, w.now)
+    .run();
+}
+
+export async function removeWishlist(db: D1Database, title: string): Promise<void> {
+  await db.prepare('DELETE FROM wishlist WHERE title = ?').bind(title).run();
+}
+
+export async function listWishlist(db: D1Database): Promise<WishlistRow[]> {
+  const { results } = await db
+    .prepare('SELECT title, prefecture, area, url, sort_order FROM wishlist ORDER BY sort_order, created_at')
+    .all();
+  return results as any[];
+}
+
+/** 渡された順に sort_order を振り直す（並び替えの保存）。 */
+export async function reorderWishlist(db: D1Database, titles: string[]): Promise<void> {
+  if (!titles.length) return;
+  const stmt = db.prepare('UPDATE wishlist SET sort_order = ? WHERE title = ?');
+  await db.batch(titles.map((t, i) => stmt.bind(i + 1, t)));
+}
+
 // ---- プラン作成のバックグラウンドジョブ ----
 
 const ENSURE_PLAN_JOBS_SQL = `CREATE TABLE IF NOT EXISTS plan_jobs (
@@ -427,8 +485,11 @@ export async function listPlans(
   db: D1Database,
   limit = 20,
 ): Promise<{ id: string; createdAt: string; area?: string; startDate?: string; endDate?: string; theme?: string }[]> {
+  await ensurePlansColumns(db);
   const { results } = await db
-    .prepare('SELECT id, created_at, request, result FROM plans ORDER BY created_at DESC LIMIT ?')
+    .prepare(
+      'SELECT id, created_at, request, result FROM plans WHERE COALESCE(hidden, 0) = 0 ORDER BY created_at DESC LIMIT ?',
+    )
     .bind(Math.min(limit, 50))
     .all();
   return (results as any[]).map((r) => {
@@ -469,9 +530,19 @@ export async function getPlan(
   };
 }
 
-/** 保存プランを削除。削除できたら true。 */
-export async function deletePlan(db: D1Database, id: string): Promise<boolean> {
-  const res = await db.prepare('DELETE FROM plans WHERE id = ?').bind(id).run();
+/** plans に hidden 列が無ければ追加する（ソフト削除用・冪等）。 */
+export async function ensurePlansColumns(db: D1Database): Promise<void> {
+  try {
+    await db.prepare('ALTER TABLE plans ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    /* 既に存在する */
+  }
+}
+
+/** 保存プランをソフト削除（一覧から隠すだけ。DBには残り、共有リンクでは閲覧可）。 */
+export async function hidePlan(db: D1Database, id: string): Promise<boolean> {
+  await ensurePlansColumns(db);
+  const res = await db.prepare('UPDATE plans SET hidden = 1 WHERE id = ?').bind(id).run();
   return (res.meta?.changes ?? 0) > 0;
 }
 

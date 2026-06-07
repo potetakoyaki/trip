@@ -7,26 +7,31 @@ import { rakutenHotelSearch } from '../scrape/hotels';
 import { createPlan } from '../planner/create-plan';
 import {
   addVisited,
+  addWishlist,
   createPlanJob,
   createSource,
-  deletePlan,
   deleteSource,
   ensureCoveredTable,
   ensureJobsTable,
   ensurePlanJobs,
   ensureVisited,
+  ensureWishlist,
   findEventPrefecture,
   getCollectedAreas,
   getJob,
   getPlan,
   getPlanJob,
   getSources,
+  hidePlan,
   insertDemoEvents,
   isCovered,
   listPlans,
   listVisited,
+  listWishlist,
   markCovered,
   removeVisited,
+  removeWishlist,
+  reorderWishlist,
   searchEvents,
   startJob,
   updateSource,
@@ -444,6 +449,54 @@ api.post('/visited', async (c) => {
   return c.json({ ok: true, visited: true, prefecture });
 });
 
+// 行ってみたい場所の一覧（並び順つき）。
+api.get('/wishlist', async (c) => {
+  await ensureWishlist(c.env.DB);
+  const wishlist = await listWishlist(c.env.DB);
+  return c.json({ wishlist });
+});
+
+// 行ってみたいの追加/解除。
+api.post('/wishlist', async (c) => {
+  const body = await c.req.json<any>().catch(() => null);
+  const title = str(body?.title, 120);
+  if (!title) return c.json({ error: 'title が必要です' }, 400);
+  await ensureWishlist(c.env.DB);
+  if (body?.wish === false) {
+    await removeWishlist(c.env.DB, title);
+    return c.json({ ok: true, wish: false });
+  }
+  const prefecture =
+    str(body?.prefecture, 20) ||
+    (await findEventPrefecture(c.env.DB, title)) ||
+    inferPrefecture(title) ||
+    '未分類';
+  await addWishlist(c.env.DB, {
+    title,
+    prefecture,
+    area: str(body?.area, 80),
+    url: str(body?.url, 300),
+    now: new Date().toISOString(),
+  });
+  return c.json({ ok: true, wish: true, prefecture });
+});
+
+// 行ってみたいの並び替えを保存する。
+api.post('/wishlist/reorder', async (c) => {
+  const body = await c.req.json<any>().catch(() => null);
+  const titles: string[] = Array.isArray(body?.titles)
+    ? body.titles
+        .filter((x: unknown) => typeof x === 'string')
+        .map((x: string) => x.trim().slice(0, 120))
+        .filter(Boolean)
+        .slice(0, 300)
+    : [];
+  if (!titles.length) return c.json({ error: 'titles が必要です' }, 400);
+  await ensureWishlist(c.env.DB);
+  await reorderWishlist(c.env.DB, titles);
+  return c.json({ ok: true });
+});
+
 api.get('/plan-status', async (c) => {
   const id = c.req.query('id');
   if (!id) return c.json({ error: 'id が必要です' }, 400);
@@ -459,9 +512,9 @@ api.get('/plan/:id', async (c) => {
   return c.json(found);
 });
 
-// 保存プランを削除する。
+// 保存プランをソフト削除する（一覧から隠すだけ。DBには残り、共有リンクでは閲覧可）。
 api.delete('/plan/:id', async (c) => {
-  const ok = await deletePlan(c.env.DB, c.req.param('id'));
+  const ok = await hidePlan(c.env.DB, c.req.param('id'));
   if (!ok) return c.json({ error: 'not found' }, 404);
   return c.json({ ok: true });
 });
