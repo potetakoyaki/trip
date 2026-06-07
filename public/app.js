@@ -160,6 +160,18 @@ function validateForm() {
 
 let pollTimer = null;
 
+function showProgress(doneRounds, totalRounds, collected, done) {
+  const wrap = $('collect-progress');
+  wrap.classList.remove('hidden');
+  wrap.classList.toggle('done', !!done);
+  const pct = totalRounds ? Math.round((doneRounds / totalRounds) * 100) : done ? 100 : 0;
+  $('cp-fill').style.width = (done ? 100 : pct) + '%';
+  $('cp-label').innerHTML = done
+    ? '✅ 収集完了'
+    : `<span class="cp-spin"></span>じっくり収集中… ${doneRounds}/${totalRounds} ラウンド`;
+  $('cp-count').textContent = `合計 ${collected} 件`;
+}
+
 async function deepCollect() {
   const area = $('area').value.trim();
   if (!area) {
@@ -178,9 +190,10 @@ async function deepCollect() {
       body: JSON.stringify({ area, keyword, interests }),
     });
     setStatus(
-      `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じてもOK、サーバーが続行します。完了後に「プランを作成する」を押してください。`,
+      `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じてもOK、サーバーが続行します。`,
       'ok',
     );
+    showProgress(0, r.totalRounds, 0, false);
     pollCollect(area);
   } catch (e) {
     setStatus('開始に失敗: ' + e.message, 'err');
@@ -198,12 +211,14 @@ function pollCollect(area) {
     try {
       const s = await api('/collect/status?area=' + encodeURIComponent(area));
       if (s.found) {
+        const doneRounds = Math.max(0, s.round - 1);
         if (s.status === 'done') {
+          showProgress(s.totalRounds, s.totalRounds, s.collected, true);
           setStatus(`収集完了（${esc(area)}・合計 ${s.collected} 件）。「プランを作成する」で使えます。`, 'ok');
           return;
         }
-        const doneRounds = Math.max(0, s.round - 1);
-        setStatus(`じっくり収集中… ${doneRounds}/${s.totalRounds} ラウンド完了（合計 ${s.collected} 件）。画面を閉じてもOK。`, '');
+        showProgress(doneRounds, s.totalRounds, s.collected, false);
+        setStatus('じっくり収集中… 画面を閉じてもサーバーが続行します。', '');
       }
     } catch {
       /* 一時失敗は無視 */
