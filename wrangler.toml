@@ -1,0 +1,34 @@
+name = "trip-planner"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# 静的フロントエンド（public/）を配信。/api/* 以外のパスはここから返り、
+# マッチしないリクエストだけが Worker (Hono) に渡る。
+[assets]
+directory = "./public"
+
+# D1 データベース。`npm run db:create` で作成後、出力された database_id を貼る。
+[[d1_databases]]
+binding = "DB"
+database_name = "trip"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# 定期スクレイピング（6時間ごと）。不要なら削除可。
+[triggers]
+crons = ["0 */6 * * *"]
+
+# Workers AI（任意）。プラン生成を AI に切り替えたい場合に使う。無料枠あり。
+# 標準はルールベース生成なので、この binding が無くても動作する。
+[ai]
+binding = "AI"
+
+[vars]
+# bot として送る User-Agent。連絡先を入れておくと相手サイトに親切。
+USER_AGENT = "TripPlannerBot/0.1 (personal use)"
+
+# --- シークレット（コミットしない） ---
+# 公式APIを使う場合は wrangler secret で設定する:
+#   wrangler secret put RAKUTEN_APP_ID
+#   wrangler secret put CONNPASS_API_KEY
+# ローカル開発では .dev.vars に書く（.dev.vars.example を参照）。

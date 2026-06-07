@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>旅行プランメーカー</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>🧳 旅行プランメーカー</h1>
+      <p class="sub">イベント・観光情報を集めて、最適な日程プランを自動作成（個人用）</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>プランを作る</h2>
+        <form id="plan-form">
+          <div class="row">
+            <label>エリア
+              <input type="text" id="area" placeholder="例: 箱根 / 京都 / 神奈川県" />
+            </label>
+          </div>
+          <div class="row two">
+            <label>開始日
+              <input type="date" id="startDate" required />
+            </label>
+            <label>終了日
+              <input type="date" id="endDate" required />
+            </label>
+          </div>
+          <div class="row">
+            <span class="label">興味（複数選択可）</span>
+            <div id="interests" class="chips"></div>
+          </div>
+          <div class="row two">
+            <label>予算の目安（円 / 1人）
+              <input type="number" id="budget" min="0" step="1000" placeholder="例: 20000" />
+            </label>
+            <label>ペース
+              <select id="pace">
+                <option value="relaxed">ゆったり（1日2件）</option>
+                <option value="normal" selected>普通（1日3件）</option>
+                <option value="packed">詰め込み（1日4件）</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="inline">
+              <input type="checkbox" id="useAi" /> Workers AI でプラン生成（利用可能な場合）
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="primary">プランを作成</button>
+            <button type="button" id="demo-btn" class="ghost">サンプルデータ投入</button>
+            <button type="button" id="scrape-btn" class="ghost">スクレイピング実行</button>
+          </div>
+        </form>
+        <p id="status" class="status"></p>
+      </section>
+
+      <section id="result" class="card hidden">
+        <h2>あなたの旅行プラン</h2>
+        <div id="plan-summary"></div>
+        <div id="plan-days"></div>
+      </section>
+
+      <section id="sources-section" class="card">
+        <h2>データソースの状態</h2>
+        <button type="button" id="refresh-sources" class="ghost small">更新</button>
+        <table id="sources-table">
+          <thead>
+            <tr><th>ID</th><th>名前</th><th>有効</th><th>最終実行</th><th>状態</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p class="hint">
+          大手予約サイトの多くは規約でスクレイピングを禁じています。公式API（楽天トラベル / connpass）や、
+          各ページの schema.org JSON-LD、観光協会の RSS を使うのが安全です。
+          ソースの設定は D1 の <code>sources</code> テーブルで管理します（README参照）。
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>Cloudflare Workers + Hono + D1 / 個人利用向け</p>
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
