@@ -4,6 +4,7 @@ import { connpassDriver } from './connpass';
 import { rakutenDriver } from './rakuten';
 import { rssDriver } from './rss';
 import { jsonldDriver } from './jsonld';
+import { blogDriver } from './blog';
 
 export interface RunContext {
   env: Env;
@@ -24,6 +25,7 @@ export const drivers: Record<string, Driver> = {
   rakuten: rakutenDriver,
   rss: rssDriver,
   jsonld: jsonldDriver,
+  blog: blogDriver,
 };
 
 export function resolveDriver(source: SourceRow): Driver | undefined {

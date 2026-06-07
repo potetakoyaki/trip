@@ -77,6 +77,7 @@
             <div class="row two">
               <label>種類
                 <select id="src-driver">
+                  <option value="blog">ブログ記事（AIが本文から抽出）</option>
                   <option value="rss">RSS / Atom フィード</option>
                   <option value="jsonld">イベントページ（JSON-LD自動抽出）</option>
                 </select>
@@ -87,7 +88,7 @@
             </div>
             <div class="row">
               <label>URL
-                <input type="text" id="src-url" placeholder="https://.../feed.xml もしくは イベント一覧ページのURL" />
+                <input type="text" id="src-url" placeholder="ブログ記事/ブログのRSS、フィード、またはイベント一覧ページのURL" />
               </label>
             </div>
             <div class="row two">
@@ -108,9 +109,11 @@
             </div>
           </form>
           <p class="hint">
+            「ブログ記事」を選ぶと、一般のブログ本文を Workers AI が読んで旅行スポットを抽出します
+            （単一記事URL・ブログのRSSどちらでもOK）。RSS/JSON-LD は構造化データをそのまま取り込みます。<br />
             ⚠️ 追加先サイトの<strong>利用規約・robots.txt を必ず確認</strong>してください。取得は
             robots尊重・逐次・ホスト別3秒間隔で行われますが、規約でスクレイピングを禁じているサイト
-            （大手予約サイト等）は避けてください。可能なら公式API・RSS・JSON-LD公開ページを選ぶのが安全です。
+            （大手予約サイト等）は避けてください。
           </p>
         </details>
 

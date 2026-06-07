@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { parseRss } from '../src/scrape/rss';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 import { robotsAllows } from '../src/scrape/robots';
+import { extractReadableText } from '../src/scrape/readable';
+import { parseSpotArray } from '../src/sources/blog';
 
 describe('parseRss', () => {
   it('RSS の item を抽出する', () => {
@@ -114,5 +116,45 @@ describe('robotsAllows', () => {
   it('自分の UA 向けルールを優先する', () => {
     const txt = 'User-agent: tripplannerbot\nDisallow: /\n\nUser-agent: *\nDisallow:';
     expect(robotsAllows(txt, '/x', ua)).toBe(false);
+  });
+});
+
+describe('extractReadableText（ブログ本文抽出）', () => {
+  it('script/style/タグを除去して本文を取り出す', () => {
+    const html = `
+      <html><head><style>.a{color:red}</style><script>var x=1;</script></head>
+      <body>
+        <h1>箱根温泉の旅</h1>
+        <p>大涌谷で黒たまごを食べました。</p>
+        <p>芦ノ湖の遊覧船もおすすめ。</p>
+      </body></html>`;
+    const text = extractReadableText(html);
+    expect(text).toContain('箱根温泉の旅');
+    expect(text).toContain('黒たまご');
+    expect(text).not.toContain('color:red');
+    expect(text).not.toContain('var x');
+    expect(text).not.toContain('<p>');
+  });
+
+  it('maxLen で切り詰める', () => {
+    const html = '<p>' + 'あ'.repeat(100) + '</p>';
+    expect(extractReadableText(html, 20).length).toBeLessThanOrEqual(20);
+  });
+});
+
+describe('parseSpotArray（AI応答からJSON配列を抽出）', () => {
+  it('前後に説明文があってもJSON配列を取り出す', () => {
+    const res = 'はい、以下が抽出結果です:\n[{"title":"大涌谷","category":"自然"},{"title":"芦ノ湖","category":"自然"}] 以上です。';
+    const spots = parseSpotArray(res);
+    expect(spots).toHaveLength(2);
+    expect(spots[0].title).toBe('大涌谷');
+  });
+
+  it('配列が無ければ空配列', () => {
+    expect(parseSpotArray('抽出できませんでした')).toEqual([]);
+  });
+
+  it('壊れたJSONは空配列', () => {
+    expect(parseSpotArray('[{"title": broken')).toEqual([]);
   });
 });

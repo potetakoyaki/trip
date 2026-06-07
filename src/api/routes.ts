@@ -35,8 +35,8 @@ api.post('/sources', async (c) => {
   const driver = String(body.driver ?? '');
   const url = String(body.url ?? '').trim();
   const name = String(body.name ?? '').trim();
-  if (driver !== 'rss' && driver !== 'jsonld') {
-    return c.json({ error: 'driver は rss か jsonld を指定してください' }, 400);
+  if (driver !== 'rss' && driver !== 'jsonld' && driver !== 'blog') {
+    return c.json({ error: 'driver は rss / jsonld / blog のいずれかを指定してください' }, 400);
   }
   let origin: string;
   try {
@@ -58,7 +58,9 @@ api.post('/sources', async (c) => {
           prefecture,
           ignoreRobots,
         }
-      : { driver: 'jsonld', pageUrls: [url], prefecture, ignoreRobots };
+      : driver === 'jsonld'
+        ? { driver: 'jsonld', pageUrls: [url], prefecture, ignoreRobots }
+        : { driver: 'blog', url, prefecture, ignoreRobots };
   const id = `${driver}-${crypto.randomUUID().slice(0, 8)}`;
   const kind = driver === 'rss' ? 'rss' : 'html';
 
