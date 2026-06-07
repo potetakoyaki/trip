@@ -829,28 +829,68 @@ select:focus {
 .cand {
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 10px 12px;
   background: #fff;
+  overflow: hidden;
 }
-.cand-name {
-  font-weight: 700;
-  font-size: 0.92rem;
-}
-.cand-meta {
-  margin-top: 6px;
+.cand > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.cand > summary::-webkit-details-marker {
+  display: none;
+}
+.cand > summary::before {
+  content: '▸';
+  color: var(--muted);
   font-size: 0.8rem;
+  transition: transform 0.15s;
+}
+.cand[open] > summary::before {
+  transform: rotate(90deg);
+}
+.cand[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.cand-name {
+  font-weight: 700;
+  font-size: 0.92rem;
+  flex: 1 1 auto;
+}
+.cand-body {
+  padding: 10px 12px;
+}
+.cand-loc {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+.cand-desc {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  line-height: 1.65;
   color: var(--ink-soft);
 }
-.cand-meta a {
+.cand-desc-empty {
+  color: var(--muted);
+}
+.cand-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.cand-links a {
   color: var(--brand-ink);
   text-decoration: none;
   font-weight: 700;
+  font-size: 0.82rem;
 }
-.cand-meta a:hover {
+.cand-links a:hover {
   text-decoration: underline;
 }
 @media (max-width: 540px) {

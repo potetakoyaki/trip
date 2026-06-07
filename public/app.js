@@ -180,8 +180,7 @@ async function deepCollect() {
     $('area').focus();
     return;
   }
-  const btn = $('collect-btn');
-  btn.disabled = true;
+  setBusy(true);
   const keyword = $('keyword').value.trim() || undefined;
   const interests = [...selectedInterests];
   try {
@@ -190,20 +189,21 @@ async function deepCollect() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ area, keyword, interests }),
     });
+    saveBusy({ type: 'collect', area });
     setStatus(
-      `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じてもOK、サーバーが続行します。`,
+      `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じても・更新してもOK、サーバーが続行します。`,
       'ok',
     );
     showProgress(0, r.totalRounds, 0, false);
     pollCollect(area);
   } catch (e) {
+    setBusy(false);
+    clearBusy();
     setStatus('開始に失敗: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
   }
 }
 
-// 開いている間だけ進捗をポーリング（閉じてもサーバー側は継続する）。
+// 開いている間だけ進捗をポーリング（閉じてもサーバー側は継続。リロードでも再開）。
 function pollCollect(area) {
   if (pollTimer) clearTimeout(pollTimer);
   let tries = 0;
@@ -216,15 +216,22 @@ function pollCollect(area) {
         if (s.status === 'done') {
           showProgress(s.totalRounds, s.totalRounds, s.collected, true);
           setStatus(`収集完了（${esc(area)}・合計 ${s.collected} 件）。「プランを作成する」で使えます。`, 'ok');
+          setBusy(false);
+          clearBusy();
           return;
         }
         showProgress(doneRounds, s.totalRounds, s.collected, false);
-        setStatus('じっくり収集中… 画面を閉じてもサーバーが続行します。', '');
+        setStatus('じっくり収集中… 画面を閉じても・更新してもサーバーが続行します。', '');
       }
     } catch {
       /* 一時失敗は無視 */
     }
-    if (tries < 80) pollTimer = setTimeout(tick, 8000);
+    if (tries < 80) {
+      pollTimer = setTimeout(tick, 8000);
+    } else {
+      setBusy(false);
+      clearBusy();
+    }
   };
   pollTimer = setTimeout(tick, 6000);
 }
@@ -248,10 +255,38 @@ function buildPlanBody() {
   };
 }
 
+// 進行中は「プラン作成」「じっくり収集」両方のボタンを無効化する。
 function setBusy(busy) {
-  const btn = $('submit-btn');
-  btn.disabled = busy;
-  btn.classList.toggle('loading', busy);
+  const main = $('submit-btn');
+  main.disabled = busy;
+  main.classList.toggle('loading', busy);
+  $('collect-btn').disabled = busy;
+}
+
+// 進行中の操作を localStorage に記録し、リロード時に再開できるようにする。
+function saveBusy(o) {
+  try {
+    localStorage.setItem('tp_busy', JSON.stringify({ ...o, ts: Date.now() }));
+  } catch {
+    /* ignore */
+  }
+}
+function clearBusy() {
+  try {
+    localStorage.removeItem('tp_busy');
+  } catch {
+    /* ignore */
+  }
+}
+function readBusy() {
+  try {
+    const v = JSON.parse(localStorage.getItem('tp_busy') || 'null');
+    if (v && Date.now() - (v.ts || 0) < 20 * 60 * 1000) return v;
+  } catch {
+    /* ignore */
+  }
+  clearBusy();
+  return null;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -268,7 +303,7 @@ async function submitPlan(ev) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    localStorage.setItem('tp_planjob', JSON.stringify({ jobId: r.jobId, ts: Date.now() }));
+    saveBusy({ type: 'plan', jobId: r.jobId });
     setStatus('プランを作成中…（画面を閉じても作成は続きます。あとで開き直すと結果が出ます）', '');
     startPlanProgress();
     pollPlanJob(r.jobId);
@@ -335,7 +370,7 @@ async function pollPlanJob(jobId) {
     if (s.found && s.status === 'done' && s.planId) {
       stopPlanProgress();
       hideProgressBar();
-      localStorage.removeItem('tp_planjob');
+      clearBusy();
       setBusy(false);
       await loadAndRenderSavedPlan(s.planId);
       setStatus('プランが完成しました 🎉', 'ok');
@@ -344,7 +379,7 @@ async function pollPlanJob(jobId) {
     if (s.found && s.status === 'error') {
       stopPlanProgress();
       hideProgressBar();
-      localStorage.removeItem('tp_planjob');
+      clearBusy();
       setBusy(false);
       setStatus('作成に失敗: ' + (s.error || '不明なエラー'), 'err');
       return;
@@ -382,6 +417,7 @@ async function loadAndRenderSavedPlan(planId) {
           location: e.city || e.prefecture || e.location_name,
           url: e.url,
           price: e.price,
+          description: e.description,
         })),
       );
     } catch {
@@ -434,13 +470,21 @@ function renderCandidates(candidates) {
       const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
       const cat = c.category ? `<span class="badge">${catEmoji(c.category)} ${esc(c.category)}</span>` : '';
       const price = c.price != null ? `<span class="item-price">${c.price === 0 ? '無料' : '目安 ' + yen(c.price)}</span>` : '';
+      const loc = c.location ? `<span class="cand-loc">📍 ${esc(c.location)}</span>` : '';
+      const desc = c.description
+        ? `<p class="cand-desc">${esc(c.description)}</p>`
+        : `<p class="cand-desc cand-desc-empty">概要はまだありません。下のリンクで確認できます。</p>`;
       const links =
-        `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍地図</a>` +
-        (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰情報元</a>` : '');
-      return `<div class="cand"><div class="cand-name">${esc(c.title)}</div><div class="cand-meta">${cat}${price} ${links}</div></div>`;
+        `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>` +
+        ` <a href="https://www.google.com/search?q=${encodeURIComponent(c.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式</a>` +
+        (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰 情報元</a>` : '');
+      return `<details class="cand">
+        <summary><span class="cand-name">${esc(c.title)}</span>${cat}${price}</summary>
+        <div class="cand-body">${loc}${desc}<div class="cand-links">${links}</div></div>
+      </details>`;
     })
     .join('');
-  el.innerHTML = `<details class="cand-box"><summary>🔎 見つかったスポット一覧（${candidates.length}件）</summary><div class="cand-list">${items}</div></details>`;
+  el.innerHTML = `<details class="cand-box" open><summary>🔎 見つかったスポット一覧（${candidates.length}件・タップで概要）</summary><div class="cand-list">${items}</div></details>`;
 }
 
 const yen = (n) => '¥' + Number(n || 0).toLocaleString();
@@ -599,23 +643,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   await loadCategories();
-  // 進行中のプラン作成ジョブがあれば再開（画面を閉じて開き直したケース）
-  const pj = readPlanJob();
-  if (pj) {
+  // 進行中の処理（プラン作成 / じっくり収集）があればリロード後も再開＆進捗表示。
+  const busy = readBusy();
+  if (busy && busy.type === 'plan' && busy.jobId) {
     setBusy(true);
-    setStatus('前回のプラン作成を再開しています…', '');
+    setStatus('プラン作成を再開しています…', '');
     startPlanProgress();
-    pollPlanJob(pj.jobId);
+    pollPlanJob(busy.jobId);
+  } else if (busy && busy.type === 'collect' && busy.area) {
+    setBusy(true);
+    setStatus('じっくり収集を再開しています…', '');
+    showProgress(0, 6, 0, false);
+    pollCollect(busy.area);
   }
 });
-
-function readPlanJob() {
-  try {
-    const v = JSON.parse(localStorage.getItem('tp_planjob') || 'null');
-    if (v && v.jobId && Date.now() - (v.ts || 0) < 20 * 60 * 1000) return v;
-  } catch {
-    /* ignore */
-  }
-  localStorage.removeItem('tp_planjob');
-  return null;
-}
