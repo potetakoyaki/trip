@@ -54,14 +54,36 @@
             </div>
           </div>
 
+          <div class="field">
+            <label>条件で提案を変える（お好みで）</label>
+            <div class="grid-3">
+              <select id="weather" aria-label="天気">
+                <option value="any">天気: 指定なし</option>
+                <option value="sunny">天気: 晴れ ☀️</option>
+                <option value="rainy">天気: 雨 ☔</option>
+              </select>
+              <select id="companions" aria-label="同行者">
+                <option value="">同行者: 指定なし</option>
+                <option value="ひとり">同行者: ひとり</option>
+                <option value="カップル">同行者: カップル</option>
+                <option value="家族">同行者: 家族</option>
+                <option value="友人">同行者: 友人</option>
+              </select>
+              <select id="vibe" aria-label="テーマ">
+                <option value="">テーマ: おまかせ</option>
+                <option value="定番">テーマ: 定番</option>
+                <option value="穴場">テーマ: 穴場</option>
+                <option value="グルメ重視">テーマ: グルメ重視</option>
+                <option value="のんびり">テーマ: のんびり</option>
+                <option value="アクティブ">テーマ: アクティブ</option>
+              </select>
+            </div>
+          </div>
+
           <div class="options">
             <label class="switch">
               <input type="checkbox" id="autoScrape" checked />
               <span>作成時に最新情報を自動収集する</span>
-            </label>
-            <label class="switch">
-              <input type="checkbox" id="useAi" />
-              <span>AI でプランを組む（任意）</span>
             </label>
           </div>
 

@@ -4,15 +4,16 @@ import { generateAiPlan } from './ai';
 
 /**
  * プラン生成のエントリポイント。
- * engine='ai' かつ Workers AI が利用可能なときだけ AI を使い、
- * それ以外（標準）は完全無料・キー不要のルールベースで生成する。
+ * Workers AI が使えるなら、理由・楽しみ方つきの提案プランを既定で生成する
+ * （engine='rule' が明示されたときだけルールベース）。AI失敗時も内部で
+ * ルールベースにフォールバックする。
  */
 export async function generatePlan(
   env: Env,
   events: EventRecord[],
   req: PlanRequest,
 ): Promise<Plan> {
-  if (req.engine === 'ai') {
+  if (req.engine !== 'rule' && env.AI) {
     return generateAiPlan(env, events, req);
   }
   return generateRulePlan(events, req);

@@ -79,6 +79,10 @@ export interface PlanRequest {
   engine?: 'rule' | 'ai';
   /** プラン作成時に最新情報を自動取得するか（既定 true）。 */
   autoScrape?: boolean;
+  /** 条件分岐: 天気 / 同行者 / テーマの志向。 */
+  weather?: 'any' | 'sunny' | 'rainy';
+  companions?: string; // ひとり / カップル / 家族 / 友人 など
+  vibe?: string; // 定番 / 穴場 / グルメ重視 / のんびり など
 }
 
 export interface PlanItem {
@@ -88,18 +92,31 @@ export interface PlanItem {
   location?: string;
   url?: string;
   price?: number;
+  /** なぜおすすめか（提案理由）。 */
   why?: string;
+  /** 楽しみ方・回り方のコツ。 */
+  tips?: string;
+  /** 目安の滞在時間。 */
+  duration?: string;
+  /** 雨天や時間が無いときの代替案。 */
+  alt?: string;
 }
 
 export interface PlanDay {
   date: string; // YYYY-MM-DD
   items: PlanItem[];
+  /** その日のテーマ/ねらい。 */
+  theme?: string;
 }
 
 export interface Plan {
+  /** プラン全体のテーマ/タイトル。 */
+  theme?: string;
   days: PlanDay[];
   summary: string;
   totalEstimatedCost: number;
   highlights: string[];
+  /** 旅行全体の楽しみ方アドバイス。 */
+  advice?: string[];
   engine: 'rule' | 'ai';
 }

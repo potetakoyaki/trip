@@ -1,49 +1,93 @@
-import type { Env, EventRecord, Plan, PlanRequest } from '../types';
+import type { Env, EventRecord, Plan, PlanDay, PlanItem, PlanRequest } from '../types';
 import { enumerateDates, generateRulePlan } from './rule-based';
 
-// Workers AI の無料枠で使える軽量モデル。
 const MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const PER_DAY: Record<NonNullable<PlanRequest['pace']>, number> = { relaxed: 2, normal: 3, packed: 4 };
+
+const SCHEMA = {
+  type: 'object',
+  properties: {
+    theme: { type: 'string' },
+    advice: { type: 'array', items: { type: 'string' } },
+    days: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          theme: { type: 'string' },
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                time: { type: 'string' },
+                category: { type: 'string' },
+                why: { type: 'string' },
+                tips: { type: 'string' },
+                duration: { type: 'string' },
+                alt: { type: 'string' },
+              },
+              required: ['title', 'why'],
+            },
+          },
+        },
+        required: ['items'],
+      },
+    },
+  },
+  required: ['theme', 'days'],
+};
 
 /**
- * Workers AI で日程プランを生成する。失敗時はルールベースにフォールバック。
- * env.AI バインディングが無ければ最初からルールベースを返す。
+ * Workers AI で「理由・楽しみ方つき」の日程プランを生成する。
+ * 候補スポットの中から AI が選んで組み立て、各スポットに提案理由・楽しみ方・
+ * 滞在目安・代替案を付ける。天気/同行者/テーマの条件も反映する。
+ * 失敗時・AI 不在時はルールベースにフォールバック。
  */
-export async function generateAiPlan(
-  env: Env,
-  events: EventRecord[],
-  req: PlanRequest,
-): Promise<Plan> {
-  if (!env.AI) return generateRulePlan(events, req);
+export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanRequest): Promise<Plan> {
+  if (!env.AI || events.length === 0) return generateRulePlan(events, req);
 
   const dates = enumerateDates(req.startDate, req.endDate);
-  // プロンプトに渡す候補は数を絞る（トークン節約）
-  const shortlist = events.slice(0, 40).map((e) => ({
+  const perDay = PER_DAY[req.pace ?? 'normal'];
+
+  // 候補（タイトルで後から実データに突き合わせる）
+  const byTitle = new Map<string, EventRecord>();
+  for (const e of events) if (!byTitle.has(e.title)) byTitle.set(e.title, e);
+  const candidates = events.slice(0, 28).map((e) => ({
     title: e.title,
-    category: e.category,
-    date: e.start_at?.slice(0, 10) ?? null,
-    location: e.location_name ?? e.city ?? e.prefecture ?? null,
-    price: e.price ?? null,
-    url: e.url ?? null,
+    category: e.category ?? undefined,
+    area: e.city ?? e.prefecture ?? undefined,
+    price: e.price ?? undefined,
   }));
 
   const sys =
-    'あなたは旅行プランナーです。与えられた候補イベントのみを使い、日程ごとの現実的な旅行プランをJSONで作成します。候補に無い場所を創作してはいけません。';
-  const user = JSON.stringify({
-    指示: '次の条件と候補から、各日2〜4件で日程プランを作成してください。',
-    条件: {
-      エリア: req.area ?? null,
-      日付: dates,
-      興味: req.interests ?? [],
-      予算: req.budget ?? null,
-      ペース: req.pace ?? 'normal',
-    },
-    候補: shortlist,
-    出力形式: {
-      summary: 'string',
-      highlights: ['string'],
-      days: [{ date: 'YYYY-MM-DD', items: [{ time: 'HH:MM?', title: 'string', category: 'string?', location: 'string?', url: 'string?', price: 0, why: 'string?' }] }],
-    },
-  });
+    'あなたは経験豊富な旅行コンシェルジュです。与えられた候補スポットだけを使って、魅力的で現実的な旅行プランをJSONで作成します。候補に無い場所を創作してはいけません。各スポットには「なぜおすすめか(why)」と「楽しみ方のコツ(tips)」を、ありきたりでなく具体的に書きます。';
+
+  const cond: string[] = [];
+  if (req.area) cond.push(`エリア: ${req.area}`);
+  cond.push(`日程: ${dates.length}日間（${dates[0]} 〜 ${dates[dates.length - 1]}）`);
+  cond.push(`1日あたり ${perDay} 件程度`);
+  if (req.interests?.length) cond.push(`興味: ${req.interests.join('、')}`);
+  if (req.budget) cond.push(`予算の目安: 1人 ${req.budget.toLocaleString()}円`);
+  if (req.weather === 'rainy') cond.push('天気: 雨（屋内・雨でも楽しめる場所を優先し、各スポットに雨天時の楽しみ方を)');
+  if (req.weather === 'sunny') cond.push('天気: 晴れ（屋外・景色を楽しめる場所を優先）');
+  if (req.companions) cond.push(`同行者: ${req.companions}（その層に合った提案・楽しみ方に）`);
+  if (req.vibe) cond.push(`テーマの志向: ${req.vibe}`);
+
+  const user = [
+    '次の条件と候補から、日程ごとの旅行プランを作ってください。',
+    '— 条件 —',
+    ...cond,
+    '— 候補スポット（この中からのみ選ぶ。titleは候補のものを完全一致で使う） —',
+    JSON.stringify(candidates, null, 0),
+    '— 出力要件 —',
+    '- theme: このプラン全体のキャッチーなテーマ（例「芦ノ湖と温泉でめぐる箱根満喫2日間」）',
+    '- advice: 旅行全体を楽しむコツを3〜5個（移動・服装・時間帯・予約など実用的に）',
+    '- days[].theme: その日のねらい',
+    '- days[].items[]: title(候補と一致), time(目安の時刻 例"10:00"), category, why(おすすめ理由・魅力を具体的に40〜80字), tips(楽しみ方/食べるべき物/回り方を具体的に40〜80字), duration(滞在目安 例"1.5時間"), alt(雨天や時間が無い時の代替案を一言)',
+    '同じ場所を複数日に重複させないこと。JSONのみ出力。',
+  ].join('\n');
 
   try {
     const res = (await env.AI.run(MODEL, {
@@ -51,36 +95,89 @@ export async function generateAiPlan(
         { role: 'system', content: sys },
         { role: 'user', content: user },
       ],
-    })) as { response?: string };
+      response_format: { type: 'json_schema', json_schema: SCHEMA },
+    })) as { response?: unknown };
 
-    const text = res?.response ?? '';
-    const parsed = extractJson(text);
-    if (!parsed || !Array.isArray(parsed.days)) throw new Error('AI 応答を解析できませんでした');
+    const parsed = coerce(res?.response);
+    if (!parsed || !Array.isArray(parsed.days)) throw new Error('AI応答を解釈できませんでした');
 
-    const total = (parsed.days as Array<{ items?: Array<{ price?: number }> }>)
-      .flatMap((d) => d.items ?? [])
-      .reduce((sum, it) => sum + (typeof it.price === 'number' ? it.price : 0), 0);
+    const used = new Set<string>();
+    let totalCost = 0;
+    const days: PlanDay[] = dates.map((date, i) => {
+      const aiDay = parsed.days[i] ?? {};
+      const rawItems: any[] = Array.isArray(aiDay.items) ? aiDay.items : [];
+      const items: PlanItem[] = [];
+      for (const it of rawItems.slice(0, perDay + 1)) {
+        const title = String(it?.title ?? '').trim();
+        if (!title || used.has(title)) continue;
+        used.add(title);
+        const rec = matchRecord(byTitle, title);
+        if (rec?.price != null) totalCost += rec.price;
+        items.push({
+          title,
+          time: cleanStr(it?.time),
+          category: rec?.category ?? cleanStr(it?.category),
+          location: rec?.location_name ?? rec?.city ?? rec?.prefecture ?? undefined,
+          url: rec?.url ?? undefined,
+          price: rec?.price ?? undefined,
+          why: cleanStr(it?.why),
+          tips: cleanStr(it?.tips),
+          duration: cleanStr(it?.duration),
+          alt: cleanStr(it?.alt),
+        });
+      }
+      items.sort((a, b) => (a.time ?? '99:99').localeCompare(b.time ?? '99:99'));
+      return { date, items, theme: cleanStr(aiDay.theme) };
+    });
+
+    const totalItems = days.reduce((n, d) => n + d.items.length, 0);
+    if (totalItems === 0) throw new Error('AIが候補を配置できませんでした');
+
+    const highlights = days.flatMap((d) => d.items).slice(0, 5).map((it) => it.title);
+    const advice = Array.isArray(parsed.advice)
+      ? parsed.advice.map((a: unknown) => String(a)).filter(Boolean).slice(0, 6)
+      : [];
 
     return {
-      days: parsed.days,
-      summary: parsed.summary ?? 'AI が作成したプランです。',
-      highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
-      totalEstimatedCost: total,
+      theme: cleanStr(parsed.theme),
+      days,
+      summary: cleanStr(parsed.theme) ?? `${req.area ?? ''}の${dates.length}日間プラン`,
+      totalEstimatedCost: totalCost,
+      highlights,
+      advice,
       engine: 'ai',
     };
   } catch {
-    // どんな失敗でも体験を止めないよう、ルールベースに退避
     return generateRulePlan(events, req);
   }
 }
 
-function extractJson(text: string): any | null {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
+function matchRecord(byTitle: Map<string, EventRecord>, title: string): EventRecord | undefined {
+  if (byTitle.has(title)) return byTitle.get(title);
+  for (const [t, rec] of byTitle) {
+    if (t.includes(title) || title.includes(t)) return rec;
   }
+  return undefined;
+}
+
+function cleanStr(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  return s ? s : undefined;
+}
+
+/** JSONモードはオブジェクトを返すが、文字列で返る場合にも対応。 */
+function coerce(r: unknown): any {
+  if (r && typeof r === 'object') return r;
+  if (typeof r === 'string') {
+    const start = r.indexOf('{');
+    const end = r.lastIndexOf('}');
+    if (start === -1 || end <= start) return null;
+    try {
+      return JSON.parse(r.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

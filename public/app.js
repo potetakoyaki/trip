@@ -80,7 +80,9 @@ async function submitPlan(ev) {
       interests: [...selectedInterests],
       budget: $('budget').value ? Number($('budget').value) : undefined,
       pace: $('pace').value,
-      engine: $('useAi').checked ? 'ai' : 'rule',
+      weather: $('weather').value,
+      companions: $('companions').value || undefined,
+      vibe: $('vibe').value || undefined,
       autoScrape,
     };
     const data = await api('/plan', {
@@ -110,14 +112,22 @@ function renderPlan(data) {
   const plan = data.plan;
   $('result').classList.remove('hidden');
 
+  const theme = plan.theme ? `<div class="plan-theme">${esc(plan.theme)}</div>` : '';
+  const summaryText =
+    plan.summary && plan.summary !== plan.theme ? `<div class="summary-text">${esc(plan.summary)}</div>` : '';
   const metaParts = [];
   if (plan.totalEstimatedCost) metaParts.push(`<span class="cost">概算 ¥${plan.totalEstimatedCost.toLocaleString()} / 人</span>`);
   const meta = metaParts.length ? `<div class="summary-meta">${metaParts.join(' ')}</div>` : '';
   const highlights = (plan.highlights || []).length
     ? `<div class="highlights">${plan.highlights.map((h) => `<span class="tag">★ ${esc(h)}</span>`).join('')}</div>`
     : '';
+  const advice = (plan.advice || []).length
+    ? `<div class="advice"><div class="advice-h">🧭 楽しみ方のヒント</div><ul>${plan.advice
+        .map((a) => `<li>${esc(a)}</li>`)
+        .join('')}</ul></div>`
+    : '';
   $('plan-summary').innerHTML =
-    `<div class="summary-box"><div class="summary-text">${esc(plan.summary)}</div>${meta}${highlights}</div>`;
+    `<div class="summary-box">${theme}${summaryText}${meta}${highlights}</div>${advice}`;
 
   const daysEl = $('plan-days');
   daysEl.innerHTML = '';
@@ -129,6 +139,7 @@ function renderPlan(data) {
 function renderDay(day, i) {
   const d = new Date(day.date + 'T00:00:00');
   const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  const dayTheme = day.theme ? `<div class="day-theme">${esc(day.theme)}</div>` : '';
   const items = day.items.length
     ? day.items.map(renderItem).join('')
     : '<div class="empty-day">この日の候補は見つかりませんでした。条件をゆるめてみてください。</div>';
@@ -136,7 +147,10 @@ function renderDay(day, i) {
     <div class="day">
       <div class="day-head">
         <div class="day-num"><small>DAY</small>${i + 1}</div>
-        <div class="day-date">${d.getMonth() + 1}/${d.getDate()}<span>(${wd})</span></div>
+        <div>
+          <div class="day-date">${d.getMonth() + 1}/${d.getDate()}<span>(${wd})</span></div>
+          ${dayTheme}
+        </div>
       </div>
       <div class="items">${items}</div>
     </div>`;
@@ -153,10 +167,20 @@ function renderItem(it) {
   if (it.category) meta.push(`<span class="badge">${catEmoji(it.category)} ${esc(it.category)}</span>`);
   if (it.location) meta.push(`<span>📍 ${esc(it.location)}</span>`);
   if (it.price != null) meta.push(`<span class="item-price">¥${Number(it.price).toLocaleString()}</span>`);
+
+  const detail = [];
+  if (it.why) detail.push(`<p class="why"><b>💡 おすすめ</b>${esc(it.why)}</p>`);
+  if (it.tips) detail.push(`<p class="tips"><b>🎯 楽しみ方</b>${esc(it.tips)}</p>`);
+  const sub = [];
+  if (it.duration) sub.push(`⏱ 滞在目安 ${esc(it.duration)}`);
+  if (it.alt) sub.push(`🔄 ${esc(it.alt)}`);
+
   return `
     <div class="item">
       <div class="item-top">${time}<span class="item-title">${title}</span></div>
       ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
+      ${detail.join('')}
+      ${sub.length ? `<div class="item-sub">${sub.join('　·　')}</div>` : ''}
     </div>`;
 }
 
