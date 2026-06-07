@@ -158,6 +158,69 @@ export async function updateJobProgress(
     .run();
 }
 
+// ---- プラン作成のバックグラウンドジョブ ----
+
+const ENSURE_PLAN_JOBS_SQL = `CREATE TABLE IF NOT EXISTS plan_jobs (
+  id TEXT PRIMARY KEY,
+  request TEXT NOT NULL,
+  origin TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  plan_id TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`;
+
+export interface PlanJob {
+  id: string;
+  request: string;
+  origin: string | null;
+  status: string;
+  plan_id: string | null;
+  error: string | null;
+}
+
+export async function ensurePlanJobs(db: D1Database): Promise<void> {
+  await db.prepare(ENSURE_PLAN_JOBS_SQL).run();
+}
+
+export async function createPlanJob(
+  db: D1Database,
+  p: { id: string; request: object; origin?: string; now: string },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO plan_jobs (id, request, origin, status, created_at, updated_at)
+       VALUES (?,?,?, 'pending', ?, ?)`,
+    )
+    .bind(p.id, JSON.stringify(p.request), p.origin ?? null, p.now, p.now)
+    .run();
+}
+
+export async function getPlanJob(db: D1Database, id: string): Promise<PlanJob | null> {
+  const r = await db.prepare('SELECT * FROM plan_jobs WHERE id = ?').bind(id).first<PlanJob>();
+  return r ?? null;
+}
+
+export async function takePendingPlanJob(db: D1Database, before: string): Promise<PlanJob | null> {
+  const r = await db
+    .prepare("SELECT * FROM plan_jobs WHERE status = 'pending' AND updated_at < ? ORDER BY updated_at ASC LIMIT 1")
+    .bind(before)
+    .first<PlanJob>();
+  return r ?? null;
+}
+
+export async function updatePlanJob(
+  db: D1Database,
+  id: string,
+  p: { status: string; planId?: string; error?: string; now: string },
+): Promise<void> {
+  await db
+    .prepare('UPDATE plan_jobs SET status=?, plan_id=?, error=?, updated_at=? WHERE id=?')
+    .bind(p.status, p.planId ?? null, p.error ?? null, p.now, id)
+    .run();
+}
+
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */
 export async function upsertEvents(
   db: D1Database,

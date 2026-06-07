@@ -2,22 +2,24 @@ import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape, roundQueries } from '../scrape/autosource';
-import { processOneRound } from '../scrape/collect-job';
-import { fetchRakutenHotels, rakutenHotelSearch } from '../scrape/hotels';
+import { processOneRound, runPlanJob } from '../scrape/collect-job';
+import { rakutenHotelSearch } from '../scrape/hotels';
+import { createPlan } from '../planner/create-plan';
 import {
+  createPlanJob,
   createSource,
   deleteSource,
   ensureJobsTable,
+  ensurePlanJobs,
   getJob,
   getPlan,
+  getPlanJob,
   getSources,
   insertDemoEvents,
-  savePlan,
   searchEvents,
   startJob,
   updateSource,
 } from '../db/repository';
-import { generatePlan } from '../planner/planner';
 import { extractSpotsDiag } from '../scrape/ai-extract';
 import { ALL_CATEGORIES } from '../util/normalize';
 
@@ -293,86 +295,44 @@ api.get('/events', async (c) => {
   return c.json({ count: events.length, events });
 });
 
+// 同期版（後方互換）。中核ロジックは createPlan に集約。
 api.post('/plan', async (c) => {
   const raw = await c.req.json<any>().catch(() => null);
   const valid = validatePlanRequest(raw);
   if (!valid.ok) return c.json({ error: valid.error }, 400);
-  const body = valid.req;
-
-  // プラン作成のたびに毎回、最新情報を取得してから組み立てる（再取得の制限なし）。
-  // 相手サーバーへの配慮はレート制限（ホスト別3秒間隔）・逐次処理・robots遵守で担保する。
-  // スクレイピングが失敗してもプラン作成は止めない（runScrape は例外を投げない）。
-  let scrape: { ran: boolean; total?: number; results?: unknown } = { ran: false };
-  if (body.autoScrape !== false) {
-    const summary = await runScrape(c.env);
-    scrape = { ran: true, total: summary.total, results: summary.results };
-  }
-
-  // 候補イベントを取得（日付不明のスポット/宿も含まれる）
-  let events = await searchEvents(c.env.DB, {
-    area: body.area,
-    from: body.startDate,
-    to: body.endDate,
-    limit: 300,
-  });
-
-  // 設定ソースが無くても、エリア名から自動で大手サイト/ブログを集めて補完する。
-  // 既に十分な候補があるエリアでは再収集しない（検索・AIの無駄打ちを避ける）。
-  let discovered: { total: number; docs: { source: string; url: string }[] } | null = null;
-  if (body.autoScrape !== false && body.area && events.length < 6) {
-    try {
-      discovered = await discoverAndScrape(c.env, {
-        area: body.area,
-        interests: body.interests,
-        keyword: body.keyword,
-      });
-    } catch (err) {
-      discovered = { total: 0, docs: [] };
-      console.error('discover failed:', err);
-    }
-    if (discovered && discovered.total > 0) {
-      events = await searchEvents(c.env.DB, {
-        area: body.area,
-        from: body.startDate,
-        to: body.endDate,
-        limit: 300,
-      });
-    }
-  }
-
-  // 楽天トラベルAPI(無料・任意)が設定されていれば、実在ホテルを取得して
-  // AI概算より優先する。未設定なら空配列でAI概算のまま。
-  let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
   try {
-    realHotels = await fetchRakutenHotels(c.env, body.area, reqOrigin(c.req.url), {
-      keywords: body.hotelFeatures,
-      maxPrice: body.budget,
-      limit: 24,
-    });
-  } catch {
-    realHotels = [];
-  }
-
-  let plan;
-  try {
-    plan = await generatePlan(c.env, events, body, { hotels: realHotels });
+    const r = await createPlan(c.env, valid.req, reqOrigin(c.req.url));
+    return c.json(r);
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
   }
+});
 
-  // 収集できたスポット一覧（プランに入らなかったものも含めて全部見せる）
-  const candidates = events.slice(0, 80).map((e) => ({
-    title: e.title,
-    category: e.category ?? undefined,
-    location: e.location_name ?? e.city ?? e.prefecture ?? undefined,
-    url: e.url ?? undefined,
-    price: e.price ?? undefined,
-  }));
+// バックグラウンドでプラン作成を開始する（画面を閉じても完成する）。
+api.post('/plan/start', async (c) => {
+  const raw = await c.req.json<any>().catch(() => null);
+  const valid = validatePlanRequest(raw);
+  if (!valid.ok) return c.json({ error: valid.error }, 400);
+  await ensurePlanJobs(c.env.DB);
+  const jobId = crypto.randomUUID();
+  await createPlanJob(c.env.DB, {
+    id: jobId,
+    request: valid.req,
+    origin: reqOrigin(c.req.url),
+    now: new Date().toISOString(),
+  });
+  c.executionCtx.waitUntil(runPlanJob(c.env, jobId).catch(() => {}));
+  return c.json({ ok: true, jobId });
+});
 
-  const id = crypto.randomUUID();
-  const createdAt = new Date().toISOString();
-  await savePlan(c.env.DB, id, createdAt, body, plan);
-  return c.json({ id, createdAt, candidateCount: events.length, plan, scrape, discovered, candidates });
+// プラン作成ジョブの進捗を取得する。
+api.get('/plan-status', async (c) => {
+  const id = c.req.query('id');
+  if (!id) return c.json({ error: 'id が必要です' }, 400);
+  await ensurePlanJobs(c.env.DB);
+  const job = await getPlanJob(c.env.DB, id);
+  if (!job) return c.json({ found: false });
+  return c.json({ found: true, status: job.status, planId: job.plan_id, error: job.error });
 });
 
 api.get('/plan/:id', async (c) => {

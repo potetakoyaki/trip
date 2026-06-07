@@ -164,6 +164,7 @@ function showProgress(doneRounds, totalRounds, collected, done) {
   const wrap = $('collect-progress');
   wrap.classList.remove('hidden');
   wrap.classList.toggle('done', !!done);
+  $('cp-fill').classList.remove('indet');
   const pct = totalRounds ? Math.round((doneRounds / totalRounds) * 100) : done ? 100 : 0;
   $('cp-fill').style.width = (done ? 100 : pct) + '%';
   $('cp-label').innerHTML = done
@@ -228,53 +229,164 @@ function pollCollect(area) {
   pollTimer = setTimeout(tick, 6000);
 }
 
+function buildPlanBody() {
+  return {
+    area: $('area').value.trim() || undefined,
+    startDate: $('startDate').value,
+    endDate: $('endDate').value,
+    interests: [...selectedInterests],
+    budget: $('budget').value ? Number($('budget').value) : undefined,
+    pace: $('pace').value,
+    weather: $('weather').value,
+    companions: $('companions').value || undefined,
+    vibe: $('vibe').value || undefined,
+    origin: $('origin').value.trim() || undefined,
+    transport: $('transport').value || undefined,
+    keyword: $('keyword').value.trim() || undefined,
+    hotelFeatures: getHotelFeatures(),
+    autoScrape: $('autoScrape').checked,
+  };
+}
+
+function setBusy(busy) {
+  const btn = $('submit-btn');
+  btn.disabled = busy;
+  btn.classList.toggle('loading', busy);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// プラン作成は「ジョブ化してバックグラウンド実行」。画面を閉じても Cron が完成させる。
 async function submitPlan(ev) {
   ev.preventDefault();
   if (!validateForm()) return;
-  const btn = $('submit-btn');
-  btn.disabled = true;
-  btn.classList.add('loading');
-  const autoScrape = $('autoScrape').checked;
-  setStatus(autoScrape ? '情報を集めてプランを作成中…（初回は数十秒かかります）' : 'プランを作成中…');
+  setBusy(true);
   try {
-    const body = {
-      area: $('area').value.trim() || undefined,
-      startDate: $('startDate').value,
-      endDate: $('endDate').value,
-      interests: [...selectedInterests],
-      budget: $('budget').value ? Number($('budget').value) : undefined,
-      pace: $('pace').value,
-      weather: $('weather').value,
-      companions: $('companions').value || undefined,
-      vibe: $('vibe').value || undefined,
-      origin: $('origin').value.trim() || undefined,
-      transport: $('transport').value || undefined,
-      keyword: $('keyword').value.trim() || undefined,
-      hotelFeatures: getHotelFeatures(),
-      autoScrape,
-    };
-    const data = await api('/plan', {
+    const body = buildPlanBody();
+    const r = await api('/plan/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    renderPlan(data);
-    currentPlanId = data.id;
-    if (currentPlanId) $('share-btn').classList.remove('hidden');
-    if (data.candidateCount === 0) {
-      setStatus(`条件に合う候補が見つかりませんでした。${discoverDiag(data.discovered)}`, 'err');
-    } else {
-      const extra = [];
-      if (data.discovered && data.discovered.total) extra.push(`自動収集 ${data.discovered.total}件`);
-      if (data.scrape && data.scrape.ran && data.scrape.total) extra.push(`登録ソース ${data.scrape.total}件`);
-      const suffix = extra.length ? ` ・ ${extra.join(' / ')}` : '';
-      setStatus(`プランが完成しました（候補 ${data.candidateCount}件${suffix}）`, 'ok');
-    }
+    localStorage.setItem('tp_planjob', JSON.stringify({ jobId: r.jobId, ts: Date.now() }));
+    setStatus('プランを作成中…（画面を閉じても作成は続きます。あとで開き直すと結果が出ます）', '');
+    startPlanProgress();
+    pollPlanJob(r.jobId);
   } catch (e) {
+    stopPlanProgress();
+    hideProgressBar();
+    setBusy(false);
     setStatus('エラー: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-    btn.classList.remove('loading');
+  }
+}
+
+const PLAN_STAGES = [
+  '情報を集めています…（大手サイト・ブログ）',
+  'AIがスポットを抽出中…',
+  '日程・ホテル・費用を計算中…',
+  '仕上げています…',
+];
+let planStageTimer = null;
+
+function startPlanProgress() {
+  let i = 0;
+  showIndet(PLAN_STAGES[0]);
+  if (planStageTimer) clearInterval(planStageTimer);
+  planStageTimer = setInterval(() => {
+    i = (i + 1) % PLAN_STAGES.length;
+    setIndetLabel(PLAN_STAGES[i]);
+  }, 4500);
+}
+function stopPlanProgress() {
+  if (planStageTimer) {
+    clearInterval(planStageTimer);
+    planStageTimer = null;
+  }
+}
+function showIndet(label) {
+  const wrap = $('collect-progress');
+  wrap.classList.remove('hidden', 'done');
+  const fill = $('cp-fill');
+  fill.classList.add('indet');
+  fill.style.width = '35%';
+  setIndetLabel(label);
+  $('cp-count').textContent = '';
+}
+function setIndetLabel(label) {
+  $('cp-label').innerHTML = `<span class="cp-spin"></span>${esc(label)}`;
+}
+function hideProgressBar() {
+  const wrap = $('collect-progress');
+  wrap.classList.add('hidden');
+  const fill = $('cp-fill');
+  fill.classList.remove('indet');
+  fill.style.width = '0%';
+}
+
+async function pollPlanJob(jobId) {
+  for (let i = 0; i < 160; i++) {
+    let s;
+    try {
+      s = await api('/plan-status?id=' + encodeURIComponent(jobId));
+    } catch {
+      await sleep(3000);
+      continue;
+    }
+    if (s.found && s.status === 'done' && s.planId) {
+      stopPlanProgress();
+      hideProgressBar();
+      localStorage.removeItem('tp_planjob');
+      setBusy(false);
+      await loadAndRenderSavedPlan(s.planId);
+      setStatus('プランが完成しました 🎉', 'ok');
+      return;
+    }
+    if (s.found && s.status === 'error') {
+      stopPlanProgress();
+      hideProgressBar();
+      localStorage.removeItem('tp_planjob');
+      setBusy(false);
+      setStatus('作成に失敗: ' + (s.error || '不明なエラー'), 'err');
+      return;
+    }
+    await sleep(3000);
+  }
+  stopPlanProgress();
+  hideProgressBar();
+  setBusy(false);
+  setStatus('時間がかかっています。少し待ってから再読み込みしてください。', '');
+}
+
+async function loadAndRenderSavedPlan(planId) {
+  const d = await api('/plan/' + encodeURIComponent(planId));
+  currentPlanId = d.id;
+  fillForm(d.request);
+  renderPlan({ plan: d.result });
+  $('share-btn').classList.remove('hidden');
+  const area = d.request && d.request.area;
+  if (area) {
+    try {
+      const qs =
+        '/events?area=' +
+        encodeURIComponent(area) +
+        '&from=' +
+        encodeURIComponent(d.request.startDate || '') +
+        '&to=' +
+        encodeURIComponent(d.request.endDate || '') +
+        '&limit=80';
+      const ev = await api(qs);
+      renderCandidates(
+        (ev.events || []).map((e) => ({
+          title: e.title,
+          category: e.category,
+          location: e.city || e.prefecture || e.location_name,
+          url: e.url,
+          price: e.price,
+        })),
+      );
+    } catch {
+      /* 候補一覧は任意 */
+    }
   }
 }
 
@@ -482,6 +594,28 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 
   const sharedId = new URLSearchParams(location.search).get('plan');
-  if (sharedId) await loadSharedPlan(sharedId);
-  else await loadCategories();
+  if (sharedId) {
+    await loadSharedPlan(sharedId);
+    return;
+  }
+  await loadCategories();
+  // 進行中のプラン作成ジョブがあれば再開（画面を閉じて開き直したケース）
+  const pj = readPlanJob();
+  if (pj) {
+    setBusy(true);
+    setStatus('前回のプラン作成を再開しています…', '');
+    startPlanProgress();
+    pollPlanJob(pj.jobId);
+  }
 });
+
+function readPlanJob() {
+  try {
+    const v = JSON.parse(localStorage.getItem('tp_planjob') || 'null');
+    if (v && v.jobId && Date.now() - (v.ts || 0) < 20 * 60 * 1000) return v;
+  } catch {
+    /* ignore */
+  }
+  localStorage.removeItem('tp_planjob');
+  return null;
+}
