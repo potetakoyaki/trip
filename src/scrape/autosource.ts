@@ -12,7 +12,7 @@ export interface DiscoverResult {
   note?: string;
 }
 
-const MAX_PAGES = 7; // 1エリアあたりに扱う大手サイト/ブログのページ数
+const MAX_PAGES = 9; // 1エリアあたりに扱う大手サイト/ブログのページ数
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';

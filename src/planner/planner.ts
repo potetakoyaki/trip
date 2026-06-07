@@ -19,10 +19,13 @@ export async function generatePlan(
   req: PlanRequest,
   opts: PlanOptions = {},
 ): Promise<Plan> {
-  if (req.engine !== 'rule' && env.AI) {
-    return generateAiPlan(env, events, req, opts);
+  const plan =
+    req.engine !== 'rule' && env.AI
+      ? await generateAiPlan(env, events, req, opts)
+      : generateRulePlan(events, req);
+  // AIプランが内部でルールベースに退避した場合でも実ホテルが消えないよう補完する。
+  if (opts.hotels?.length && (!plan.hotels || plan.hotels.length === 0)) {
+    plan.hotels = opts.hotels;
   }
-  const plan = generateRulePlan(events, req);
-  if (opts.hotels?.length) plan.hotels = opts.hotels;
   return plan;
 }

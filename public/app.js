@@ -235,7 +235,30 @@ function renderPlan(data) {
   daysEl.innerHTML = '';
   plan.days.forEach((day, i) => daysEl.insertAdjacentHTML('beforeend', renderDay(day, i)));
 
+  renderCandidates(data.candidates);
+
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderCandidates(candidates) {
+  const el = $('plan-extra');
+  if (!el) return;
+  if (!candidates || !candidates.length) {
+    el.innerHTML = '';
+    return;
+  }
+  const items = candidates
+    .map((c) => {
+      const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
+      const cat = c.category ? `<span class="badge">${catEmoji(c.category)} ${esc(c.category)}</span>` : '';
+      const price = c.price != null ? `<span class="item-price">${c.price === 0 ? '無料' : '目安 ' + yen(c.price)}</span>` : '';
+      const links =
+        `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍地図</a>` +
+        (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰情報元</a>` : '');
+      return `<div class="cand"><div class="cand-name">${esc(c.title)}</div><div class="cand-meta">${cat}${price} ${links}</div></div>`;
+    })
+    .join('');
+  el.innerHTML = `<details class="cand-box"><summary>🔎 見つかったスポット一覧（${candidates.length}件）</summary><div class="cand-list">${items}</div></details>`;
 }
 
 const yen = (n) => '¥' + Number(n || 0).toLocaleString();

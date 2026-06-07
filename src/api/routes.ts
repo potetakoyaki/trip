@@ -285,7 +285,7 @@ api.post('/plan', async (c) => {
     realHotels = await fetchRakutenHotels(c.env, body.area, reqOrigin(c.req.url), {
       keywords: body.hotelFeatures,
       maxPrice: body.budget,
-      limit: 12,
+      limit: 24,
     });
   } catch {
     realHotels = [];
@@ -298,10 +298,19 @@ api.post('/plan', async (c) => {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
   }
 
+  // 収集できたスポット一覧（プランに入らなかったものも含めて全部見せる）
+  const candidates = events.slice(0, 80).map((e) => ({
+    title: e.title,
+    category: e.category ?? undefined,
+    location: e.location_name ?? e.city ?? e.prefecture ?? undefined,
+    url: e.url ?? undefined,
+    price: e.price ?? undefined,
+  }));
+
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   await savePlan(c.env.DB, id, createdAt, body, plan);
-  return c.json({ id, createdAt, candidateCount: events.length, plan, scrape, discovered });
+  return c.json({ id, createdAt, candidateCount: events.length, plan, scrape, discovered, candidates });
 });
 
 api.get('/plan/:id', async (c) => {
