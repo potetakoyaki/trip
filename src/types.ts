@@ -93,6 +93,8 @@ export interface PlanRequest {
   keyword?: string;
   /** ホテルの希望条件（例: 温泉 / 露天風呂 / 夕食付き / リゾート）。 */
   hotelFeatures?: string[];
+  /** 省エネモード（軽量AIモデルでNeuron消費を抑える）。 */
+  eco?: boolean;
 }
 
 export interface PlanItem {
@@ -161,9 +163,21 @@ export interface CostBreakdown {
   withinBudget?: boolean;
 }
 
+export interface DayForecast {
+  date: string;
+  code: number;
+  tmax?: number;
+  tmin?: number;
+  pop?: number; // 降水確率(%)
+  label: string;
+  emoji: string;
+}
+
 export interface Plan {
   /** プラン全体のテーマ/タイトル。 */
   theme?: string;
+  /** 旅行日の天気予報（Open-Meteo・取得できた場合）。 */
+  forecast?: DayForecast[];
   days: PlanDay[];
   summary: string;
   totalEstimatedCost: number;

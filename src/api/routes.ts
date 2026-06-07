@@ -6,22 +6,33 @@ import { processOneRound, runPlanJob } from '../scrape/collect-job';
 import { rakutenHotelSearch } from '../scrape/hotels';
 import { createPlan } from '../planner/create-plan';
 import {
+  addVisited,
   createPlanJob,
   createSource,
+  deletePlan,
   deleteSource,
+  ensureCoveredTable,
   ensureJobsTable,
   ensurePlanJobs,
+  ensureVisited,
+  findEventPrefecture,
+  getCollectedAreas,
   getJob,
   getPlan,
   getPlanJob,
   getSources,
   insertDemoEvents,
+  isCovered,
+  listPlans,
+  listVisited,
+  markCovered,
+  removeVisited,
   searchEvents,
   startJob,
   updateSource,
 } from '../db/repository';
 import { extractSpotsDiag } from '../scrape/ai-extract';
-import { ALL_CATEGORIES } from '../util/normalize';
+import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
 
@@ -83,6 +94,7 @@ function validatePlanRequest(body: any): { ok: true; req: PlanRequest } | { ok: 
     keyword: str(body.keyword, 80),
     hotelFeatures: strArr(body.hotelFeatures),
     autoScrape: body.autoScrape === false ? false : true,
+    eco: body.eco === true,
     engine: body.engine === 'rule' ? 'rule' : undefined,
   };
   return { ok: true, req };
@@ -252,8 +264,10 @@ api.post('/collect/start', async (c) => {
   const keyword = str(raw?.keyword, 80);
   const interests = strArr(raw?.interests);
   await ensureJobsTable(c.env.DB);
+  await ensureCoveredTable(c.env.DB);
+  const now = new Date().toISOString();
+  const kw = keyword ?? '';
 
-  // 無駄なAI消費を防ぐ: 既に収集中 / 収集済みのエリアは再収集させない。
   const existing = await getJob(c.env.DB, area);
   const existingCount = (await searchEvents(c.env.DB, { area, limit: 60 })).length;
   if (existing && existing.status === 'pending') {
@@ -264,7 +278,33 @@ api.post('/collect/start', async (c) => {
       message: `「${area}」は既に収集中です。完了までお待ちください。`,
     });
   }
-  if ((existing && existing.status === 'done') || existingCount >= 15) {
+
+  const collected = (existing && existing.status === 'done') || existingCount >= 15;
+  if (collected) {
+    // 条件（キーワード）が増えていたら、その差分だけを追加収集する。
+    if (keyword && !(await isCovered(c.env.DB, area, kw))) {
+      let added = 0;
+      try {
+        const r = await discoverAndScrape(c.env, {
+          area,
+          queries: [`${area} ${keyword}`, `${area} ${keyword} おすすめ スポット`],
+          maxPages: 4,
+        });
+        added = r.total;
+      } catch {
+        /* 差分収集失敗は無視 */
+      }
+      await markCovered(c.env.DB, area, kw, now);
+      const total = (await searchEvents(c.env.DB, { area, limit: 500 })).length;
+      return c.json({
+        ok: true,
+        delta: true,
+        added,
+        total,
+        message: `「${keyword}」の追加分を収集しました（合計 ${total} 件）。`,
+      });
+    }
+    // 新しい条件が無ければ再収集しない。
     return c.json({
       ok: false,
       reason: 'collected',
@@ -273,11 +313,30 @@ api.post('/collect/start', async (c) => {
     });
   }
 
+  // 未収集 → フル収集（バックグラウンド）。
   const { totalRounds } = roundQueries(area, 1, keyword);
-  await startJob(c.env.DB, { area, keyword, interests, totalRounds, now: new Date().toISOString() });
-  // 最初の1ラウンドはこのリクエストのバックグラウンドで即実行（待たずに返す）。
+  await startJob(c.env.DB, { area, keyword, interests, totalRounds, now });
+  await markCovered(c.env.DB, area, '', now);
+  if (keyword) await markCovered(c.env.DB, area, kw, now);
   c.executionCtx.waitUntil(processOneRound(c.env, area).catch(() => {}));
   return c.json({ ok: true, area, totalRounds });
+});
+
+// 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
+api.get('/areas/similar', async (c) => {
+  const area = (c.req.query('area') || '').trim();
+  if (!area) return c.json({ match: null });
+  await ensureJobsTable(c.env.DB);
+  const areas = await getCollectedAreas(c.env.DB);
+  let match: string | null = null;
+  for (const a of areas) {
+    if (!a || a === area) continue;
+    if (a.includes(area) || area.includes(a)) {
+      match = a;
+      break;
+    }
+  }
+  return c.json({ match });
 });
 
 // じっくり収集の進捗を取得する。
@@ -347,6 +406,44 @@ api.post('/plan/start', async (c) => {
 });
 
 // プラン作成ジョブの進捗を取得する。
+// 保存プランの履歴一覧。
+api.get('/plans', async (c) => {
+  const plans = await listPlans(c.env.DB, 20);
+  return c.json({ plans });
+});
+
+// 行ったことある場所の一覧（都道府県・エリア別はフロントでグループ化）。
+api.get('/visited', async (c) => {
+  await ensureVisited(c.env.DB);
+  const visited = await listVisited(c.env.DB);
+  return c.json({ visited });
+});
+
+// 行った/未訪問の切り替え。
+api.post('/visited', async (c) => {
+  const body = await c.req.json<any>().catch(() => null);
+  const title = str(body?.title, 120);
+  if (!title) return c.json({ error: 'title が必要です' }, 400);
+  await ensureVisited(c.env.DB);
+  if (body?.visited === false) {
+    await removeVisited(c.env.DB, title);
+    return c.json({ ok: true, visited: false });
+  }
+  const prefecture =
+    str(body?.prefecture, 20) ||
+    (await findEventPrefecture(c.env.DB, title)) ||
+    inferPrefecture(title) ||
+    '未分類';
+  await addVisited(c.env.DB, {
+    title,
+    prefecture,
+    area: str(body?.area, 80),
+    url: str(body?.url, 300),
+    now: new Date().toISOString(),
+  });
+  return c.json({ ok: true, visited: true, prefecture });
+});
+
 api.get('/plan-status', async (c) => {
   const id = c.req.query('id');
   if (!id) return c.json({ error: 'id が必要です' }, 400);
@@ -360,4 +457,11 @@ api.get('/plan/:id', async (c) => {
   const found = await getPlan(c.env.DB, c.req.param('id'));
   if (!found) return c.json({ error: 'not found' }, 404);
   return c.json(found);
+});
+
+// 保存プランを削除する。
+api.delete('/plan/:id', async (c) => {
+  const ok = await deletePlan(c.env.DB, c.req.param('id'));
+  if (!ok) return c.json({ error: 'not found' }, 404);
+  return c.json({ ok: true });
 });

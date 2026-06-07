@@ -158,6 +158,90 @@ export async function updateJobProgress(
     .run();
 }
 
+// 収集済みの (エリア, キーワード) 条件を記録し、差分収集の判定に使う。
+const ENSURE_COVERED_SQL = `CREATE TABLE IF NOT EXISTS collect_covered (
+  area TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (area, keyword)
+)`;
+
+export async function ensureCoveredTable(db: D1Database): Promise<void> {
+  await db.prepare(ENSURE_COVERED_SQL).run();
+}
+
+export async function isCovered(db: D1Database, area: string, keyword: string): Promise<boolean> {
+  const r = await db
+    .prepare('SELECT 1 AS x FROM collect_covered WHERE area = ? AND keyword = ?')
+    .bind(area, keyword)
+    .first();
+  return !!r;
+}
+
+export async function markCovered(db: D1Database, area: string, keyword: string, now: string): Promise<void> {
+  await db
+    .prepare('INSERT OR IGNORE INTO collect_covered (area, keyword, created_at) VALUES (?,?,?)')
+    .bind(area, keyword, now)
+    .run();
+}
+
+/** じっくり収集したエリア名の一覧（似たエリア名の判定に使う）。 */
+export async function getCollectedAreas(db: D1Database): Promise<string[]> {
+  const { results } = await db.prepare('SELECT area FROM collect_jobs').all();
+  return (results as any[]).map((r) => String(r.area)).filter(Boolean);
+}
+
+// ---- 行ったことある場所（visited） ----
+
+const ENSURE_VISITED_SQL = `CREATE TABLE IF NOT EXISTS visited (
+  title TEXT PRIMARY KEY,
+  prefecture TEXT,
+  area TEXT,
+  url TEXT,
+  created_at TEXT NOT NULL
+)`;
+
+export interface VisitedRow {
+  title: string;
+  prefecture: string | null;
+  area: string | null;
+  url: string | null;
+}
+
+export async function ensureVisited(db: D1Database): Promise<void> {
+  await db.prepare(ENSURE_VISITED_SQL).run();
+}
+
+export async function addVisited(
+  db: D1Database,
+  v: { title: string; prefecture?: string; area?: string; url?: string; now: string },
+): Promise<void> {
+  await db
+    .prepare('INSERT OR REPLACE INTO visited (title, prefecture, area, url, created_at) VALUES (?,?,?,?,?)')
+    .bind(v.title, v.prefecture ?? null, v.area ?? null, v.url ?? null, v.now)
+    .run();
+}
+
+export async function removeVisited(db: D1Database, title: string): Promise<void> {
+  await db.prepare('DELETE FROM visited WHERE title = ?').bind(title).run();
+}
+
+export async function listVisited(db: D1Database): Promise<VisitedRow[]> {
+  const { results } = await db
+    .prepare('SELECT title, prefecture, area, url FROM visited ORDER BY prefecture, area, title')
+    .all();
+  return results as any[];
+}
+
+/** events から同名スポットの都道府県を補完する（visited 登録時の都道府県解決用）。 */
+export async function findEventPrefecture(db: D1Database, title: string): Promise<string | null> {
+  const r = await db
+    .prepare("SELECT prefecture FROM events WHERE title = ? AND prefecture IS NOT NULL AND prefecture != '' LIMIT 1")
+    .bind(title)
+    .first<{ prefecture: string }>();
+  return r?.prefecture ?? null;
+}
+
 // ---- プラン作成のバックグラウンドジョブ ----
 
 const ENSURE_PLAN_JOBS_SQL = `CREATE TABLE IF NOT EXISTS plan_jobs (
@@ -338,6 +422,39 @@ export async function savePlan(
     .run();
 }
 
+/** 直近の保存プラン一覧（履歴）。 */
+export async function listPlans(
+  db: D1Database,
+  limit = 20,
+): Promise<{ id: string; createdAt: string; area?: string; startDate?: string; endDate?: string; theme?: string }[]> {
+  const { results } = await db
+    .prepare('SELECT id, created_at, request, result FROM plans ORDER BY created_at DESC LIMIT ?')
+    .bind(Math.min(limit, 50))
+    .all();
+  return (results as any[]).map((r) => {
+    let req: any = {};
+    let res: any = {};
+    try {
+      req = JSON.parse(r.request);
+    } catch {
+      /* ignore */
+    }
+    try {
+      res = JSON.parse(r.result);
+    } catch {
+      /* ignore */
+    }
+    return {
+      id: r.id,
+      createdAt: r.created_at,
+      area: req?.area,
+      startDate: req?.startDate,
+      endDate: req?.endDate,
+      theme: res?.theme,
+    };
+  });
+}
+
 export async function getPlan(
   db: D1Database,
   id: string,
@@ -350,6 +467,12 @@ export async function getPlan(
     request: JSON.parse(row.request),
     result: JSON.parse(row.result),
   };
+}
+
+/** 保存プランを削除。削除できたら true。 */
+export async function deletePlan(db: D1Database, id: string): Promise<boolean> {
+  const res = await db.prepare('DELETE FROM plans WHERE id = ?').bind(id).run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
 /** 動作確認用のサンプルイベントを投入する。 */

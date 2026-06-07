@@ -2,6 +2,8 @@ import type { Env, EventRecord, Plan, PlanDay, PlanItem, PlanRequest } from '../
 import { enumerateDates, generateRulePlan } from './rule-based';
 
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// 省エネモード用の軽量モデル（Neuron消費が小さい）。
+const ECO_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 const PER_DAY: Record<NonNullable<PlanRequest['pace']>, number> = { relaxed: 2, normal: 3, packed: 4 };
 
 const SCHEMA = {
@@ -129,11 +131,15 @@ export async function generateAiPlan(
     '   access(行き方を一言), duration(滞在目安), alt(代替案), estCost(その場所の目安費用・円の数値。入場料や飲食代。無料は0)。',
     '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、tips に名物料理・おすすめメニュー・予算感を具体的に書く（estCostに目安）。',
     '  候補に飲食店が少なければ、そのエリアで評判の料理ジャンルや店を一般知識で提案してよい。',
-    '- 観光スポットは候補から選び、同じ場所を重複させない。JSONのみ出力。',
+    '- 観光スポットは候補から選び、同じ場所を重複させない。',
+    '- 各日の項目は移動効率が良い順（地理的に近い場所が連続するよう）に並べ、time もその順で矛盾なく付ける。JSONのみ出力。',
   ].join('\n');
 
+  // 省エネモードでは軽量モデルを使い、Neuron消費を抑える。
+  const model = req.eco ? ECO_MODEL : MODEL;
+
   try {
-    const res = (await env.AI.run(MODEL, {
+    const res = (await env.AI.run(model, {
       messages: [
         { role: 'system', content: sys },
         { role: 'user', content: user },
