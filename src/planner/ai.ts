@@ -69,7 +69,12 @@ const SCHEMA = {
  * 候補スポットから AI が選んで組み立て、出発地からの移動（目安）・ホテル候補・
  * 各スポットの目安費用を出し、予算（滞在費＋ホテル）と比較する内訳も作る。
  */
-export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanRequest): Promise<Plan> {
+export async function generateAiPlan(
+  env: Env,
+  events: EventRecord[],
+  req: PlanRequest,
+  opts: { hotels?: import('../types').HotelOption[] } = {},
+): Promise<Plan> {
   if (!env.AI || events.length === 0) return generateRulePlan(events, req);
 
   const dates = enumerateDates(req.startDate, req.endDate);
@@ -174,8 +179,8 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
     const totalItems = days.reduce((n, d) => n + d.items.length, 0);
     if (totalItems === 0) throw new Error('AIが候補を配置できませんでした');
 
-    // ホテル
-    const hotels = Array.isArray(parsed.hotels)
+    // ホテル: 実在データ（楽天等）があれば優先、無ければ AI 概算
+    const aiHotels = Array.isArray(parsed.hotels)
       ? parsed.hotels
           .filter((h: any) => h && typeof h.name === 'string')
           .slice(0, 3)
@@ -186,6 +191,7 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
             why: cleanStr(h.why),
           }))
       : [];
+    const hotels = opts.hotels && opts.hotels.length ? opts.hotels : aiHotels;
 
     // 移動
     let travel = undefined;

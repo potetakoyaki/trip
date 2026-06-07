@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
+import { fetchRakutenHotels } from '../scrape/hotels';
 import {
   createSource,
   deleteSource,
@@ -196,9 +197,18 @@ api.post('/plan', async (c) => {
     }
   }
 
+  // 楽天トラベルAPI(無料・任意)が設定されていれば、実在ホテルを取得して
+  // AI概算より優先する。未設定なら空配列でAI概算のまま。
+  let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
+  try {
+    realHotels = await fetchRakutenHotels(c.env, body.area);
+  } catch {
+    realHotels = [];
+  }
+
   let plan;
   try {
-    plan = await generatePlan(c.env, events, body);
+    plan = await generatePlan(c.env, events, body, { hotels: realHotels });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
   }

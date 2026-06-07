@@ -184,15 +184,18 @@ function renderCost(c) {
 
 function renderHotels(hotels) {
   const list = hotels
-    .map(
-      (h) => `<div class="hotel">
-      <div class="hotel-top"><span class="hotel-name">${esc(h.name)}</span>${
+    .map((h) => {
+      const name = h.url
+        ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.name)}</a>`
+        : esc(h.name);
+      return `<div class="hotel">
+      <div class="hotel-top"><span class="hotel-name">${name}</span>${
         h.nightlyPrice ? `<span class="hotel-price">${yen(h.nightlyPrice)} / 泊・人〜</span>` : ''
       }</div>
       ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
       ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
-    </div>`,
-    )
+    </div>`;
+    })
     .join('');
   return `<div class="info-card">
     <div class="info-h">🏨 宿泊の候補</div>
