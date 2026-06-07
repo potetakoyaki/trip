@@ -67,10 +67,11 @@ export async function extractSpots(
   if (!env.AI || !text.trim()) return [];
   const messages = buildMessages(text, hint);
 
-  // 1) JSONモード（schema強制）
+  // 1) JSONモード（schema強制）。max_tokens を確保し出力の途中切れを防ぐ。
   try {
     const res = await env.AI.run(EXTRACT_MODEL, {
       messages,
+      max_tokens: 1500,
       response_format: { type: 'json_schema', json_schema: JSON_SCHEMA },
     });
     const spots = readSpots(res);
@@ -81,7 +82,7 @@ export async function extractSpots(
 
   // 2) 軽量モデルで素のJSON出力 → テキストから配列抽出
   try {
-    const res = await env.AI.run(FALLBACK_MODEL, { messages });
+    const res = await env.AI.run(FALLBACK_MODEL, { messages, max_tokens: 1500 });
     return readSpots(res);
   } catch {
     return [];
@@ -138,6 +139,7 @@ export async function extractSpotsDiag(
   try {
     const res = (await env.AI.run(EXTRACT_MODEL, {
       messages,
+      max_tokens: 1500,
       response_format: { type: 'json_schema', json_schema: JSON_SCHEMA },
     })) as any;
     const raw = typeof res?.response === 'string' ? res.response : JSON.stringify(res?.response ?? res);

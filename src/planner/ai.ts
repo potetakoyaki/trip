@@ -138,6 +138,7 @@ export async function generateAiPlan(
         { role: 'system', content: sys },
         { role: 'user', content: user },
       ],
+      max_tokens: 3000,
       response_format: { type: 'json_schema', json_schema: SCHEMA },
     })) as { response?: unknown };
 
