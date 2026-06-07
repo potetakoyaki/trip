@@ -77,12 +77,16 @@ export async function rakutenHotelSearch(
     const info = wrap.hotel?.[0]?.hotelBasicInfo;
     if (!info?.hotelName) continue;
     const addr = `${info.address1 ?? ''}${info.address2 ?? ''}`.trim();
+    // ホテル番号から正規の予約ページURLを組み立てる（hotelInformationUrlは画像系のことがある）。
+    const bookingUrl = info.hotelNo
+      ? `https://travel.rakuten.co.jp/HOTEL/${info.hotelNo}/${info.hotelNo}.html`
+      : info.hotelInformationUrl || undefined;
     hotels.push({
       name: String(info.hotelName),
       area: addr || undefined,
       nightlyPrice: typeof info.hotelMinCharge === 'number' ? info.hotelMinCharge : undefined,
       why: info.hotelSpecial ? String(info.hotelSpecial).slice(0, 80) : undefined,
-      url: info.hotelInformationUrl || undefined,
+      url: bookingUrl,
     });
     if (hotels.length >= 3) break;
   }
