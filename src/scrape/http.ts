@@ -13,6 +13,8 @@ interface GetOptions {
   cacheTtl?: number;
   /** robots.txt チェックをスキップ（robots.txt 自体の取得用）。 */
   skipRobots?: boolean;
+  /** 追加のリクエストヘッダ（APIキー等）。 */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -54,6 +56,7 @@ export class HttpClient {
         'User-Agent': this.userAgent,
         Accept: opts.accept ?? 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
         'Accept-Language': 'ja,en;q=0.8',
+        ...(opts.headers ?? {}),
       },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);

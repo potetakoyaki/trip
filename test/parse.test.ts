@@ -4,7 +4,7 @@ import { parseJsonLdEvents } from '../src/scrape/jsonld';
 import { robotsAllows } from '../src/scrape/robots';
 import { extractReadableText } from '../src/scrape/readable';
 import { parseSpotArray } from '../src/scrape/ai-extract';
-import { extractDdgLinks } from '../src/scrape/autosource';
+import { extractDdgLinks, extractBingLinks } from '../src/scrape/autosource';
 
 describe('parseRss', () => {
   it('RSS の item を抽出する', () => {
@@ -176,5 +176,18 @@ describe('extractDdgLinks（検索結果から実URL抽出）', () => {
 
   it('結果が無ければ空配列', () => {
     expect(extractDdgLinks('<html>no results</html>')).toEqual([]);
+  });
+});
+
+describe('extractBingLinks（Bing結果から実URL抽出）', () => {
+  it('h2>a の結果URLを抽出し、bing自身は除外', () => {
+    const html = `
+      <li class="b_algo"><h2><a href="https://www.jalan.net/kankou/hakone/">箱根観光</a></h2></li>
+      <li class="b_algo"><h2><a href="https://travel.blog.example.jp/hakone?a=1&amp;b=2">箱根ブログ</a></h2></li>
+      <h2><a href="https://www.bing.com/aclick?u=ad">広告</a></h2>`;
+    const links = extractBingLinks(html);
+    expect(links).toContain('https://www.jalan.net/kankou/hakone/');
+    expect(links).toContain('https://travel.blog.example.jp/hakone?a=1&b=2');
+    expect(links.some((u) => u.includes('bing.com'))).toBe(false);
   });
 });

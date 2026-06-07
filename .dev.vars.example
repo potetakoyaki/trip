@@ -8,3 +8,7 @@ RAKUTEN_APP_ID=
 # connpass API キー（connpass の公式APIを使う場合）
 # https://connpass.com/about/api/ から申請
 CONNPASS_API_KEY=
+
+# Brave Search API キー（自動収集の検索を安定させたい場合・任意）
+# https://brave.com/search/api/ で無料登録（月2000クエリ無料）
+BRAVE_API_KEY=

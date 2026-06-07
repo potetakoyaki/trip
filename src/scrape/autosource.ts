@@ -8,6 +8,8 @@ import { inferCategory, inferPrefecture } from '../util/normalize';
 export interface DiscoverResult {
   total: number;
   docs: { source: string; url: string }[];
+  stats: { candidates: number; fetched: number; engine: string | null };
+  note?: string;
 }
 
 const MAX_PAGES = 4; // 1エリアあたりに読む大手サイト/ブログのページ数
@@ -21,34 +23,41 @@ const BROWSER_UA =
  * ユーザーがソースを登録しなくても、エリア名から自動で情報源を集めて
  * AI で旅行スポットを抽出・保存する（「サイトはアプリが自動で決める」動作）。
  *
- * Web検索（DuckDuckGo）で「<エリア> 観光 おすすめ」等を引き、上位に出る
- * 大手旅行サイト・ブログ記事を数件スクレイピングして、Workers AI で構造化する。
- * env.AI（Workers AI）が無ければ何もしない。
+ * Web検索で「<エリア> 観光 おすすめ」等を引き、上位の大手旅行サイト・ブログ記事を
+ * 数件スクレイピングして Workers AI で構造化する。
+ * 検索は Brave API（キーがあれば最優先・確実）→ Bing → DuckDuckGo の順で試す。
  */
 export async function discoverAndScrape(
   env: Env,
   opts: { area: string; interests?: string[] },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
-  if (!area || !env.AI) return { total: 0, docs: [] };
+  const empty: DiscoverResult = { total: 0, docs: [], stats: { candidates: 0, fetched: 0, engine: null } };
+  if (!area) return { ...empty, note: 'エリアが空です' };
+  if (!env.AI) return { ...empty, note: 'Workers AI(env.AI) が無効です' };
 
   const http = new HttpClient({ userAgent: BROWSER_UA });
 
-  // 1) 検索で候補URLを集める（大手サイト・ブログが上位に来る）
-  const candidates: string[] = [];
-  const seenUrl = new Set<string>();
+  // 1) 検索で候補URLを集める
+  let candidates: string[] = [];
+  let engine: string | null = null;
   for (const q of buildQueries(area, opts.interests)) {
-    const links = await searchWeb(http, q);
-    for (const l of links) {
-      if (!seenUrl.has(l)) {
-        seenUrl.add(l);
-        candidates.push(l);
-      }
+    const r = await searchWeb(http, env, q);
+    if (r.urls.length) {
+      engine = r.engine;
+      for (const u of r.urls) if (!candidates.includes(u)) candidates.push(u);
     }
     if (candidates.length >= 12) break;
   }
 
-  // 2) 上位の候補を、ホスト重複を避けつつ本文取得
+  if (!candidates.length) {
+    return {
+      ...empty,
+      note: '検索結果を取得できませんでした（検索エンジンがサーバーからのアクセスをブロックしている可能性）。Brave Search API キーの設定を推奨します。',
+    };
+  }
+
+  // 2) 上位候補を、ホスト重複を避けつつ本文取得
   const docs: { source: string; url: string; text: string }[] = [];
   const seenHost = new Set<string>();
   for (const link of candidates) {
@@ -59,8 +68,7 @@ export async function discoverAndScrape(
     } catch {
       continue;
     }
-    if (isExcludedHost(host)) continue;
-    if (seenHost.has(host)) continue;
+    if (isExcludedHost(host) || seenHost.has(host)) continue;
     seenHost.add(host);
     try {
       const html = await http.getText(link, { skipRobots: true });
@@ -88,8 +96,7 @@ export async function discoverAndScrape(
           url: doc.url,
           category: s.category || inferCategory(title, s.description) || '観光',
           prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
-          // エリアで確実に引っかかるよう、市区町村が無ければエリア名を入れる
-          city: s.city || area,
+          city: s.city || area, // エリアで確実に引っかかるように
           raw: { from: doc.source, area },
         });
       }
@@ -99,31 +106,66 @@ export async function discoverAndScrape(
     }
   }
 
-  return { total, docs: docs.map((d) => ({ source: d.source, url: d.url })) };
+  const stats = { candidates: candidates.length, fetched: docs.length, engine };
+  let note: string | undefined;
+  if (docs.length === 0) note = '検索はできたが、ページ本文を取得できませんでした（各サイトがブロックしている可能性）。';
+  else if (total === 0) note = 'ページは取得できたが、AIがスポットを抽出できませんでした。';
+
+  return { total, docs: docs.map((d) => ({ source: d.source, url: d.url })), stats, note };
 }
 
-/** 検索エンジン自身や非コンテンツのホストを除外（大手旅行サイト・ブログは通す）。 */
+/** 検索: Brave API（キーがあれば）→ Bing → DuckDuckGo の順に試す。 */
+async function searchWeb(
+  http: HttpClient,
+  env: Env,
+  query: string,
+): Promise<{ urls: string[]; engine: string | null }> {
+  // Brave Search API（キーがあれば最優先・最も確実）
+  if (env.BRAVE_API_KEY) {
+    try {
+      const json = await http.getJson<any>(
+        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&country=jp&search_lang=jp&count=10`,
+        { skipRobots: true, headers: { 'X-Subscription-Token': env.BRAVE_API_KEY, Accept: 'application/json' } },
+      );
+      const urls = (json?.web?.results ?? []).map((r: any) => r?.url).filter((u: any) => typeof u === 'string');
+      if (urls.length) return { urls, engine: 'brave' };
+    } catch {
+      /* フォールバック */
+    }
+  }
+
+  // Bing（サーバーIPに比較的寛容）
+  try {
+    const html = await http.getText(`https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=ja`, {
+      skipRobots: true,
+    });
+    const urls = extractBingLinks(html);
+    if (urls.length) return { urls, engine: 'bing' };
+  } catch {
+    /* フォールバック */
+  }
+
+  // DuckDuckGo（html / lite）
+  for (const [url, eng] of [
+    [`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, 'ddg-html'],
+    [`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, 'ddg-lite'],
+  ] as const) {
+    try {
+      const html = await http.getText(url, { skipRobots: true });
+      const urls = extractDdgLinks(html);
+      if (urls.length) return { urls, engine: eng };
+    } catch {
+      /* 次へ */
+    }
+  }
+
+  return { urls: [], engine: null };
+}
+
 function isExcludedHost(host: string): boolean {
   return /duckduckgo\.com|google\.|bing\.com|yahoo\.co|youtube\.com|wikipedia\.org|wikivoyage\.org|facebook\.com|twitter\.com|x\.com|instagram\.com|amazon\.|pinterest\./i.test(
     host,
   );
-}
-
-/** DuckDuckGo（lite/html）で検索し、結果の実URL一覧を返す。 */
-async function searchWeb(http: HttpClient, query: string): Promise<string[]> {
-  for (const url of [
-    `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
-    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-  ]) {
-    try {
-      const html = await http.getText(url, { skipRobots: true });
-      const links = extractDdgLinks(html);
-      if (links.length) return links;
-    } catch {
-      /* 次のエンドポイントを試す */
-    }
-  }
-  return [];
 }
 
 /** DuckDuckGo HTML 結果から実URLを取り出す（uddg リダイレクトを復元）。純粋関数。 */
@@ -141,6 +183,23 @@ export function extractDdgLinks(html: string): string[] {
       }
     } catch {
       /* skip */
+    }
+  }
+  return out;
+}
+
+/** Bing 検索結果HTMLから結果URLを取り出す。純粋関数。 */
+export function extractBingLinks(html: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /<h2>\s*<a[^>]+href="(https?:\/\/[^"]+)"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null && out.length < 30) {
+    const u = m[1].replace(/&amp;/g, '&');
+    if (/bing\.com|microsoft\.com|msn\.com|go\.microsoft/i.test(u)) continue;
+    if (!seen.has(u)) {
+      seen.add(u);
+      out.push(u);
     }
   }
   return out;

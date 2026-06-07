@@ -8,6 +8,8 @@ export interface Env {
   USER_AGENT?: string;
   RAKUTEN_APP_ID?: string;
   CONNPASS_API_KEY?: string;
+  /** Brave Search API キー（任意）。自動収集の検索を安定化する。 */
+  BRAVE_API_KEY?: string;
 }
 
 /** スクレイパが返す正規化済みイベント（DB保存前）。 */

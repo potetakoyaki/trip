@@ -23,6 +23,19 @@ api.get('/health', (c) =>
 
 api.get('/categories', (c) => c.json({ categories: ALL_CATEGORIES }));
 
+// 診断用: Workers AI が実際に動くか確認する。
+api.get('/ai-test', async (c) => {
+  if (!c.env.AI) return c.json({ ok: false, error: 'AI binding がありません' });
+  try {
+    const res = (await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [{ role: 'user', content: '「箱根」で有名な観光スポットを1つだけ、名称のみ答えて。' }],
+    })) as { response?: string };
+    return c.json({ ok: true, response: res?.response ?? null });
+  } catch (e) {
+    return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 api.get('/sources', async (c) => {
   const sources = await getSources(c.env.DB);
   return c.json({ sources });

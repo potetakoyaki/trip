@@ -156,11 +156,15 @@ async function submitPlan(ev) {
       body: JSON.stringify(body),
     });
     renderPlan(data);
-    const extra = [];
-    if (data.discovered && data.discovered.total) extra.push(`自動収集 ${data.discovered.total}件`);
-    if (data.scrape && data.scrape.ran && data.scrape.total) extra.push(`登録ソース ${data.scrape.total}件`);
-    const suffix = extra.length ? ` / ${extra.join(' / ')}` : '';
-    setStatus(`完成（候補 ${data.candidateCount}件${suffix}）`, 'ok');
+    if (data.candidateCount === 0) {
+      setStatus(`候補が0件でした。${discoverDiag(data.discovered)}`, 'err');
+    } else {
+      const extra = [];
+      if (data.discovered && data.discovered.total) extra.push(`自動収集 ${data.discovered.total}件`);
+      if (data.scrape && data.scrape.ran && data.scrape.total) extra.push(`登録ソース ${data.scrape.total}件`);
+      const suffix = extra.length ? ` / ${extra.join(' / ')}` : '';
+      setStatus(`完成（候補 ${data.candidateCount}件${suffix}）`, 'ok');
+    }
     if (autoScrape) loadSources();
   } catch (e) {
     setStatus('エラー: ' + e.message, 'err');
@@ -230,6 +234,14 @@ async function runDemo(ev) {
   }
 }
 
+function discoverDiag(discovered) {
+  if (!discovered) return '';
+  const s = discovered.stats;
+  const stat = s ? `[検索候補 ${s.candidates} / 取得 ${s.fetched} / エンジン ${s.engine || 'なし'}]` : '';
+  const note = discovered.note ? ' ' + discovered.note : '';
+  return `${stat}${note}`;
+}
+
 async function runScrape(ev) {
   const btn = ev.currentTarget;
   btn.disabled = true;
@@ -255,7 +267,7 @@ async function runScrape(ev) {
     } else if (failed.length) {
       setStatus('失敗: ' + failed.map((r) => `${r.source}: ${r.message}`).join(' / '), 'err');
     } else if (area) {
-      setStatus(`「${area}」の情報が見つかりませんでした。別の地名やキーワードを試してください。`, 'err');
+      setStatus(`「${area}」の情報が見つかりませんでした。${discoverDiag(summary.discovered)}`, 'err');
     } else {
       setStatus('エリアを入力して実行すると、自動で大手サイト・ブログから収集します。', 'err');
     }
