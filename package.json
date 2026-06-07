@@ -1,0 +1,26 @@
+{
+  "name": "trip-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Workers + Hono + D1 で作る個人用の旅行プラン作成サイト",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:create": "wrangler d1 create trip",
+    "db:migrate:local": "wrangler d1 migrations apply trip --local",
+    "db:migrate": "wrangler d1 migrations apply trip --remote"
+  },
+  "dependencies": {
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.95.0"
+  }
+}

@@ -1,0 +1,10 @@
+# このファイルを .dev.vars にコピーして、ローカル開発用の値を入れる。
+# .dev.vars は .gitignore 済みなのでコミットされない。
+
+# 楽天ウェブサービスのアプリID（楽天トラベルAPIを使う場合）
+# https://webservice.rakuten.co.jp/ で無料登録
+RAKUTEN_APP_ID=
+
+# connpass API キー（connpass の公式APIを使う場合）
+# https://connpass.com/about/api/ から申請
+CONNPASS_API_KEY=
