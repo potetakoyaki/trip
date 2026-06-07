@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
-import { fetchRakutenHotels } from '../scrape/hotels';
+import { fetchRakutenHotels, rakutenHotelSearch } from '../scrape/hotels';
 import {
   createSource,
   deleteSource,
@@ -42,12 +42,20 @@ api.get('/ai-test', async (c) => {
   return c.json(out);
 });
 
-// 診断用: 楽天トラベルAPIが設定・動作しているか確認する。
+// 診断用: 楽天トラベルAPIが設定・動作しているか確認する（生応答も表示）。
 api.get('/hotels-test', async (c) => {
   const area = c.req.query('area') || '箱根';
-  const configured = Boolean(c.env.RAKUTEN_APP_ID);
-  const hotels = await fetchRakutenHotels(c.env, area);
-  return c.json({ configured, area, count: hotels.length, hotels });
+  const r = await rakutenHotelSearch(c.env, area);
+  return c.json({
+    configured: Boolean(c.env.RAKUTEN_APP_ID),
+    area,
+    ok: r.ok,
+    status: r.status,
+    error: r.error,
+    count: r.hotels.length,
+    hotels: r.hotels,
+    raw: r.raw,
+  });
 });
 
 api.get('/sources', async (c) => {
