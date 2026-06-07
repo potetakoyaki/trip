@@ -31,11 +31,13 @@ import {
   listVisited,
   listWishlist,
   markCovered,
+  markPlanSaved,
   removeVisited,
   removeWishlist,
   reorderWishlist,
   searchEvents,
   startJob,
+  updatePlanResult,
   updateSource,
 } from '../db/repository';
 import { extractSpotsDiag } from '../scrape/ai-extract';
@@ -532,6 +534,18 @@ api.get('/plan/:id', async (c) => {
   const found = await getPlan(c.env.DB, c.req.param('id'));
   if (!found) return c.json({ error: 'not found' }, 404);
   return c.json(found);
+});
+
+// プランを「保存」する（保存ボタンを押したものだけ履歴に残す）。編集後の内容も反映する。
+api.post('/plan/:id/save', async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json<any>().catch(() => null);
+  if (body && body.result && typeof body.result === 'object') {
+    await updatePlanResult(c.env.DB, id, body.result);
+  }
+  const ok = await markPlanSaved(c.env.DB, id);
+  if (!ok) return c.json({ error: 'not found' }, 404);
+  return c.json({ ok: true, saved: true });
 });
 
 // 保存プランをソフト削除する（一覧から隠すだけ。DBには残り、共有リンクでは閲覧可）。

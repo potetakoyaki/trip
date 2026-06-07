@@ -386,6 +386,48 @@ async function sharePlan() {
   }
 }
 
+// 保存ボタンの表示状態。saved=true で「保存済み」、false で「保存」に。
+function setSaveButton(saved) {
+  const b = $('save-btn');
+  if (!b) return;
+  b.classList.remove('hidden');
+  if (saved) {
+    b.textContent = '✓ 保存済み';
+    b.disabled = true;
+    b.classList.add('saved');
+  } else {
+    b.textContent = '💾 このプランを保存';
+    b.disabled = false;
+    b.classList.remove('saved');
+  }
+}
+
+// 編集したら「変更を保存」に戻す（再保存で内容も更新される）。
+function markPlanDirty() {
+  const b = $('save-btn');
+  if (!b) return;
+  b.classList.remove('hidden', 'saved');
+  b.disabled = false;
+  b.textContent = '💾 変更を保存';
+}
+
+// 「保存」を押したプランだけを履歴に残す。編集後の内容も一緒に保存する。
+async function saveCurrentPlan() {
+  if (!currentPlanId || !currentPlan) return;
+  try {
+    await api('/plan/' + encodeURIComponent(currentPlanId) + '/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ result: currentPlan }),
+    });
+    setSaveButton(true);
+    setStatus('プランを保存しました。メニューの「保存したプラン」から開けます。', 'ok');
+    loadHistory();
+  } catch (e) {
+    setStatus('保存に失敗: ' + e.message, 'err');
+  }
+}
+
 async function loadSharedPlan(id) {
   setStatus('保存されたプランを読み込み中…');
   try {
@@ -398,6 +440,7 @@ async function loadSharedPlan(id) {
     currentTransport = (d.request && d.request.transport) || '';
     renderPlan({ plan: d.result });
     $('share-btn').classList.remove('hidden');
+    setSaveButton(d.saved !== false);
     setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
   } catch (e) {
     await loadCategories();
@@ -692,6 +735,9 @@ async function submitPlan(ev) {
   ev.preventDefault();
   if (!validateForm()) return;
   setBusy(true);
+  // 新規作成中は前回プランの保存/共有ボタンを隠す（完成後に出し直す）。
+  $('save-btn').classList.add('hidden');
+  $('share-btn').classList.add('hidden');
   try {
     await resolveArea($('area').value.trim());
     const body = buildPlanBody();
@@ -819,6 +865,7 @@ async function loadAndRenderSavedPlan(planId) {
   currentTransport = (d.request && d.request.transport) || '';
   renderPlan({ plan: d.result });
   $('share-btn').classList.remove('hidden');
+  setSaveButton(!!d.saved);
   const area = d.request && d.request.area;
   if (area) {
     try {
@@ -953,6 +1000,7 @@ function movePlanItem(dayIndex, idx, dir) {
     return; // 端で移動先なし
   }
   renderPlanDays();
+  markPlanDirty();
 }
 
 // プランからスポットを外す。
@@ -961,6 +1009,7 @@ function removePlanItem(dayIndex, idx) {
   if (!day) return;
   day.items.splice(idx, 1);
   renderPlanDays();
+  markPlanDirty();
 }
 
 // 見つかったスポット一覧からプランへ追加する（1日目の末尾に。重複は防ぐ）。
@@ -983,10 +1032,12 @@ function addSpotToPlan(candIdx) {
     url: c.url,
     price: c.price,
     hours: c.hours,
+    description: c.description,
     lat: c.lat,
     lng: c.lng,
   });
   renderPlanDays();
+  markPlanDirty();
   setStatus(`「${c.title}」を1日目に追加しました。↑↓で好きな順・日に動かせます。`, 'ok');
   $('plan-days').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1068,7 +1119,64 @@ function evaluatePlan(plan, mode) {
     .map(([c, n]) => `${catEmoji(c)}${c}${n}`)
     .join('・');
   if (catText) points.push(`内訳: ${catText}`);
-  return { points, warnings };
+
+  // 具体的な「楽しみ方・グルメ・注意点」を、いま入っているスポットから組み立てる。
+  const allItems = days.flatMap((d) => d.items || []);
+  return {
+    points,
+    warnings,
+    enjoy: buildEnjoy(allItems),
+    food: buildFood(allItems),
+    caution: buildCaution(warnings),
+  };
+}
+
+function clip(s, n) {
+  s = String(s || '').trim().replace(/\s+/g, ' ');
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// スポットの楽しみ方を、実際に入っているスポットの tips/why/概要から具体的に（〜100字）。
+function buildEnjoy(items) {
+  const withText = items
+    .map((it) => ({ name: it.title, txt: it.tips || it.why || it.description || '' }))
+    .filter((x) => x.txt);
+  if (!withText.length) {
+    return 'スポットを追加すると、その楽しみ方がここに具体的に表示されます。各スポットのカードの「楽しみ方」も参考に。';
+  }
+  withText.sort((a, b) => b.txt.length - a.txt.length);
+  const parts = [];
+  let len = 0;
+  for (const x of withText) {
+    const piece = `「${x.name}」では${clip(x.txt, 55)}`;
+    parts.push(piece);
+    len += piece.length;
+    if (len >= 90 || parts.length >= 2) break;
+  }
+  return parts.join('。') + '。';
+}
+
+// 美味しいご飯（グルメ）の提案。グルメが無ければ追加を促す。
+function buildFood(items) {
+  const gourmet = items.filter((it) => it.category === 'グルメ');
+  if (!gourmet.length) {
+    return '食事スポットがまだありません。下の一覧から🍜グルメを1〜2件プランに追加すると、ランチ・ディナーが決まって満足度が上がります。';
+  }
+  const parts = gourmet.slice(0, 2).map((g) => {
+    const t = g.tips || g.description || '';
+    return t ? `「${g.title}」で${clip(t, 45)}` : `「${g.title}」`;
+  });
+  const more = gourmet.length > 2 ? `ほか${gourmet.length - 2}件のグルメも候補に。` : '';
+  return `食事は${parts.join('、')}がおすすめ。${more}`;
+}
+
+// 気をつける点。警告があれば要約し、無ければ一般的な注意を〜100字で。
+function buildCaution(warnings) {
+  if (warnings.length) {
+    const top = warnings.slice(0, 2).join(' / ');
+    return clip(top, 120) + ' 時間に余裕を持たせ、無理なら1件減らす調整も検討を。';
+  }
+  return '大きな無理はありません。各スポットの営業時間・定休日、当日の天候、人気店の予約や行列の有無は念のため事前に確認しておくと安心です。';
 }
 
 // 評価欄を再描画する（プラン編集のたびに呼ばれ、再計算される）。
@@ -1083,20 +1191,17 @@ function renderEval() {
   const points = r.points.length
     ? `<ul class="eval-points">${r.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`
     : '';
-  const warns = r.warnings.length
-    ? `<div class="eval-warn-h">⚠ 現実的なチェック（${r.warnings.length}件）</div><ul class="eval-warns">${r.warnings
-        .map((w) => `<li>${esc(w)}</li>`)
-        .join('')}</ul>`
-    : `<div class="eval-ok">✅ 無理のないスケジュールです。移動・営業時間の大きな問題は見つかりませんでした。</div>`;
+  const warnList = r.warnings.length
+    ? `<ul class="eval-warns">${r.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`
+    : '';
   el.innerHTML = `<div class="eval-card">
     <div class="eval-h">📝 プラン評価<span class="eval-note">編集すると自動で再計算</span></div>
     <div class="eval-points-h">📌 ポイント</div>${points}
-    ${warns}
+    <div class="eval-blurb"><div class="eb-h">😋 楽しみ方</div><p>${esc(r.enjoy)}</p></div>
+    <div class="eval-blurb food"><div class="eb-h">🍴 美味しいご飯</div><p>${esc(r.food)}</p></div>
+    <div class="eval-blurb caution"><div class="eb-h">⚠ 気をつける点</div><p>${esc(r.caution)}</p>${warnList}</div>
   </div>`;
 }
-
-// 中カテゴリー（既存category）の表示順
-const CAT_ORDER = ['観光', '歴史', 'アート', '自然', '体験', 'グルメ', 'イベント', '祭り', '音楽', 'テック', '宿泊'];
 
 // 大カテゴリー（中カテゴリーをまとめる括り）
 const MAJOR_CATS = [
@@ -1109,6 +1214,38 @@ function majorOf(mid) {
   for (const m of MAJOR_CATS) if (m.mids.includes(mid)) return m;
   return { name: 'その他', emoji: '📍', mids: [] };
 }
+
+// 宿泊カテゴリーを、名称からホテル/旅館などの中カテゴリーに振り分ける。
+const ACCOM_TYPES = ['ホテル', '旅館', 'リゾート', 'ペンション', '民宿', 'ゲストハウス', 'コテージ', 'その他の宿'];
+const ACCOM_EMOJI = {
+  ホテル: '🏨',
+  旅館: '♨️',
+  リゾート: '🏝️',
+  ペンション: '🏡',
+  民宿: '🏠',
+  ゲストハウス: '🛏️',
+  コテージ: '🏕️',
+  その他の宿: '🛏️',
+};
+function accommodationType(title) {
+  const t = String(title || '');
+  if (/旅館|旅亭|温泉宿|湯宿/.test(t)) return '旅館';
+  if (/ホテル|HOTEL|Hotel/.test(t)) return 'ホテル';
+  if (/リゾート|RESORT|Resort|グランピング/.test(t)) return 'リゾート';
+  if (/ペンション/.test(t)) return 'ペンション';
+  if (/民宿/.test(t)) return '民宿';
+  if (/ゲストハウス|ホステル|hostel|guesthouse/i.test(t)) return 'ゲストハウス';
+  if (/コテージ|ヴィラ|villa/i.test(t)) return 'コテージ';
+  return 'その他の宿';
+}
+// 中カテゴリーの絵文字（宿泊の細分は専用、その他は通常カテゴリー絵文字）。
+function midEmoji(mid) {
+  return ACCOM_EMOJI[mid] || catEmoji(mid);
+}
+// 中カテゴリーの並び順（宿泊の細分も含む）。
+const MID_ORDER = ['観光', '歴史', 'アート', '自然', '体験', 'グルメ', 'イベント', '祭り', '音楽', 'テック'].concat(
+  ACCOM_TYPES,
+);
 
 function candCard(c, idx) {
   const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
@@ -1141,11 +1278,17 @@ function renderCandidates(candidates) {
     el.innerHTML = '';
     return;
   }
-  // 大 → 中 → [{c, i}]
+  // 大 → 中 → [{c, i}]。宿泊は名称からホテル/旅館などの中カテゴリーに分ける。
   const majors = {};
   currentCandidates.forEach((c, i) => {
-    const mid = c.category || 'その他';
-    const major = majorOf(mid).name;
+    let mid = c.category || 'その他';
+    let major;
+    if (c.category === '宿泊') {
+      major = '宿泊';
+      mid = accommodationType(c.title);
+    } else {
+      major = majorOf(mid).name;
+    }
     majors[major] = majors[major] || {};
     (majors[major][mid] = majors[major][mid] || []).push({ c, i });
   });
@@ -1158,15 +1301,15 @@ function renderCandidates(candidates) {
       const mids = majors[mName];
       const total = Object.values(mids).reduce((n, arr) => n + arr.length, 0);
       const midKeys = Object.keys(mids).sort((a, b) => {
-        const ia = CAT_ORDER.indexOf(a);
-        const ib = CAT_ORDER.indexOf(b);
+        const ia = MID_ORDER.indexOf(a);
+        const ib = MID_ORDER.indexOf(b);
         return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
       });
       const midHtml = midKeys
         .map((mid) => {
           const cards = mids[mid].map(({ c, i }) => candCard(c, i)).join('');
           return `<details class="mid-group">
-            <summary><span class="mid-name">${catEmoji(mid)} ${esc(mid)}</span><span class="cat-count">${mids[mid].length}</span></summary>
+            <summary><span class="mid-name">${midEmoji(mid)} ${esc(mid)}</span><span class="cat-count">${mids[mid].length}</span></summary>
             <div class="cand-list">${cards}</div>
           </details>`;
         })
@@ -1395,6 +1538,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('plan-form').addEventListener('submit', submitPlan);
   $('collect-btn').addEventListener('click', deepCollect);
   $('share-btn').addEventListener('click', sharePlan);
+  $('save-btn').addEventListener('click', saveCurrentPlan);
 
   // ハンバーガーメニュー（保存プラン・行った場所）の開閉。
   $('menu-btn').addEventListener('click', openDrawer);
