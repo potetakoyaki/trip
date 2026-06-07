@@ -189,6 +189,12 @@ async function deepCollect() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ area, keyword, interests }),
     });
+    // 既に収集中／収集済みなら、再収集せずメッセージを出す（AI消費の無駄を防ぐ）。
+    if (r.ok === false) {
+      setBusy(false);
+      setStatus(r.message || 'このエリアは既に収集済みです。', r.reason === 'running' ? '' : 'ok');
+      return;
+    }
     saveBusy({ type: 'collect', area });
     setStatus(
       `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じても・更新してもOK、サーバーが続行します。`,
