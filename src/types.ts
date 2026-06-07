@@ -7,6 +7,8 @@ export interface Env {
   AI?: { run: (model: string, input: unknown) => Promise<unknown> };
   USER_AGENT?: string;
   RAKUTEN_APP_ID?: string;
+  /** 楽天 新API の Access Key（pk_ で始まる・新APIで必須）。 */
+  RAKUTEN_ACCESS_KEY?: string;
   CONNPASS_API_KEY?: string;
   /** Brave Search API キー（任意）。自動収集の検索を安定化する。 */
   BRAVE_API_KEY?: string;

@@ -19,6 +19,15 @@ import { ALL_CATEGORIES } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
 
+/** リクエストURLからオリジン（https://host）を取り出す。楽天新APIのOrigin/Referer用。 */
+function reqOrigin(reqUrl: string): string | undefined {
+  try {
+    return new URL(reqUrl).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 api.get('/health', (c) =>
   c.json({ ok: true, now: new Date().toISOString(), aiAvailable: Boolean(c.env.AI) }),
 );
@@ -45,9 +54,12 @@ api.get('/ai-test', async (c) => {
 // 診断用: 楽天トラベルAPIが設定・動作しているか確認する（生応答も表示）。
 api.get('/hotels-test', async (c) => {
   const area = c.req.query('area') || '箱根';
-  const r = await rakutenHotelSearch(c.env, area);
+  const origin = reqOrigin(c.req.url);
+  const r = await rakutenHotelSearch(c.env, area, origin);
   return c.json({
-    configured: Boolean(c.env.RAKUTEN_APP_ID),
+    hasAppId: Boolean(c.env.RAKUTEN_APP_ID),
+    hasAccessKey: Boolean(c.env.RAKUTEN_ACCESS_KEY),
+    origin,
     area,
     ok: r.ok,
     status: r.status,
@@ -217,7 +229,7 @@ api.post('/plan', async (c) => {
   // AI概算より優先する。未設定なら空配列でAI概算のまま。
   let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
   try {
-    realHotels = await fetchRakutenHotels(c.env, body.area);
+    realHotels = await fetchRakutenHotels(c.env, body.area, reqOrigin(c.req.url));
   } catch {
     realHotels = [];
   }

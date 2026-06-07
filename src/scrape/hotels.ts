@@ -8,31 +8,47 @@ export interface RakutenResult {
   raw?: string;
 }
 
+// 2026年の楽天API刷新後の新エンドポイント（旧 app.rakuten.co.jp は2026/5に停止）。
+const ENDPOINT = 'https://openapi.rakuten.co.jp/engine/api/Travel/KeywordHotelSearch/20170426';
+
 /**
- * 楽天トラベル KeywordHotelSearch でエリアの実在ホテルを検索する。
- * 診断できるよう、ステータス・エラー・生応答の一部も返す。
+ * 楽天トラベル KeywordHotelSearch（新API）でエリアの実在ホテルを検索する。
+ * 新APIは applicationId(UUID) と accessKey(pk_) の両方が必須で、Origin/Referer
+ * ヘッダー（登録した許可ドメイン）も要求される。
  */
-export async function rakutenHotelSearch(env: Env, area?: string): Promise<RakutenResult> {
+export async function rakutenHotelSearch(
+  env: Env,
+  area?: string,
+  origin?: string,
+): Promise<RakutenResult> {
   if (!env.RAKUTEN_APP_ID) return { ok: false, status: 0, hotels: [], error: 'RAKUTEN_APP_ID 未設定' };
+  if (!env.RAKUTEN_ACCESS_KEY)
+    return { ok: false, status: 0, hotels: [], error: 'RAKUTEN_ACCESS_KEY 未設定（新APIのpk_キー）' };
   if (!area) return { ok: false, status: 0, hotels: [], error: 'エリア未指定' };
 
   const params = new URLSearchParams({
     applicationId: env.RAKUTEN_APP_ID,
+    accessKey: env.RAKUTEN_ACCESS_KEY,
     format: 'json',
     keyword: area,
     hits: '15',
   });
-  const url = `https://app.rakuten.co.jp/services/api/Travel/KeywordHotelSearch/20170426?${params.toString()}`;
+  const url = `${ENDPOINT}?${params.toString()}`;
+
+  const headers: Record<string, string> = {
+    'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)',
+    Accept: 'application/json',
+  };
+  // 新APIはブラウザ前提の設計で Origin/Referer を確認する。許可ドメインと一致させる。
+  if (origin) {
+    headers.Origin = origin;
+    headers.Referer = origin.endsWith('/') ? origin : origin + '/';
+  }
 
   let status = 0;
   let text = '';
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)',
-        Accept: 'application/json',
-      },
-    });
+    const res = await fetch(url, { headers });
     status = res.status;
     text = await res.text();
   } catch (e) {
@@ -46,7 +62,6 @@ export async function rakutenHotelSearch(env: Env, area?: string): Promise<Rakut
     return { ok: false, status, hotels: [], error: 'JSON解析に失敗', raw: text.slice(0, 300) };
   }
 
-  // 楽天はエラー時 {error, error_description} を返す
   if (data && data.error) {
     return {
       ok: false,
@@ -75,7 +90,7 @@ export async function rakutenHotelSearch(env: Env, area?: string): Promise<Rakut
 }
 
 /** プラン用: ホテル配列だけ返す（失敗時は空）。 */
-export async function fetchRakutenHotels(env: Env, area?: string): Promise<HotelOption[]> {
-  const r = await rakutenHotelSearch(env, area);
+export async function fetchRakutenHotels(env: Env, area?: string, origin?: string): Promise<HotelOption[]> {
+  const r = await rakutenHotelSearch(env, area, origin);
   return r.hotels;
 }
