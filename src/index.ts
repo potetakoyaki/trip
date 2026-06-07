@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { api } from './api/routes';
 import { runScrape } from './scrape/runner';
-import { processCollectQueue } from './scrape/collect-job';
+import { processCollectQueue, processPlanJobQueue } from './scrape/collect-job';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -25,6 +25,7 @@ export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (controller.cron === '* * * * *') {
       ctx.waitUntil(processCollectQueue(env).catch((e) => console.error('collect queue failed:', e)));
+      ctx.waitUntil(processPlanJobQueue(env).catch((e) => console.error('plan queue failed:', e)));
     } else {
       ctx.waitUntil(
         runScrape(env)

@@ -50,3 +50,33 @@ function safeParse(s: string): string[] | undefined {
     return undefined;
   }
 }
+
+// ---- プラン作成ジョブ ----
+import { createPlan } from '../planner/create-plan';
+import { ensurePlanJobs, getPlanJob, takePendingPlanJob, updatePlanJob } from '../db/repository';
+
+/** 1件のプラン作成ジョブを実行する。 */
+export async function runPlanJob(env: Env, id: string): Promise<void> {
+  await ensurePlanJobs(env.DB);
+  const job = await getPlanJob(env.DB, id);
+  if (!job || job.status !== 'pending') return;
+  try {
+    const req = JSON.parse(job.request);
+    const r = await createPlan(env, req, job.origin ?? undefined);
+    await updatePlanJob(env.DB, id, { status: 'done', planId: r.id, now: new Date().toISOString() });
+  } catch (e) {
+    await updatePlanJob(env.DB, id, {
+      status: 'error',
+      error: e instanceof Error ? e.message : String(e),
+      now: new Date().toISOString(),
+    });
+  }
+}
+
+/** Cron の保険: waitUntil が途中で切れた未完了ジョブを拾って完了させる。 */
+export async function processPlanJobQueue(env: Env): Promise<void> {
+  await ensurePlanJobs(env.DB);
+  const before = new Date(Date.now() - 90_000).toISOString(); // 90秒以上 pending のもの
+  const job = await takePendingPlanJob(env.DB, before);
+  if (job) await runPlanJob(env, job.id);
+}
