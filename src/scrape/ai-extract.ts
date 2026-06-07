@@ -41,9 +41,10 @@ function buildMessages(text: string, hint: { area?: string; interests?: string[]
   if (hint.area) hintLines.push(`対象エリア: ${hint.area}`);
   if (hint.interests?.length) hintLines.push(`特に次の興味に関連するものを優先: ${hint.interests.join('、')}`);
   const user = [
-    '次の文章から訪問先を最大10件抽出し、JSONで返してください。',
+    '次の文章から訪問先を最大12件抽出し、JSONで返してください。',
     ...hintLines,
-    '各要素のフィールド: title(名称・必須), category(グルメ/自然/歴史/アート/音楽/体験/宿泊/祭り/観光 のいずれか), prefecture, city, description(20〜60字)。',
+    '観光名所だけでなく、カフェ・レストラン・食堂・名物グルメの店も積極的に拾ってください。',
+    '各要素のフィールド: title(名称・必須), category(グルメ/自然/歴史/アート/音楽/体験/宿泊/祭り/観光 のいずれか), prefecture, city, description(その場所の魅力や名物を40〜80字で具体的に)。',
     '',
     '文章:',
     text,

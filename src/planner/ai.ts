@@ -1,7 +1,7 @@
 import type { Env, EventRecord, Plan, PlanDay, PlanItem, PlanRequest } from '../types';
 import { enumerateDates, generateRulePlan } from './rule-based';
 
-const MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const PER_DAY: Record<NonNullable<PlanRequest['pace']>, number> = { relaxed: 2, normal: 3, packed: 4 };
 
 const SCHEMA = {
@@ -25,10 +25,11 @@ const SCHEMA = {
                 category: { type: 'string' },
                 why: { type: 'string' },
                 tips: { type: 'string' },
+                access: { type: 'string' },
                 duration: { type: 'string' },
                 alt: { type: 'string' },
               },
-              required: ['title', 'why'],
+              required: ['title', 'why', 'tips'],
             },
           },
         },
@@ -54,11 +55,12 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
   // 候補（タイトルで後から実データに突き合わせる）
   const byTitle = new Map<string, EventRecord>();
   for (const e of events) if (!byTitle.has(e.title)) byTitle.set(e.title, e);
-  const candidates = events.slice(0, 28).map((e) => ({
+  const candidates = events.slice(0, 36).map((e) => ({
     title: e.title,
     category: e.category ?? undefined,
     area: e.city ?? e.prefecture ?? undefined,
     price: e.price ?? undefined,
+    desc: e.description ? String(e.description).slice(0, 120) : undefined,
   }));
 
   const sys =
@@ -81,12 +83,18 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
     ...cond,
     '— 候補スポット（この中からのみ選ぶ。titleは候補のものを完全一致で使う） —',
     JSON.stringify(candidates, null, 0),
-    '— 出力要件 —',
+    '— 出力要件（具体的に・自然な文章で） —',
     '- theme: このプラン全体のキャッチーなテーマ（例「芦ノ湖と温泉でめぐる箱根満喫2日間」）',
-    '- advice: 旅行全体を楽しむコツを3〜5個（移動・服装・時間帯・予約など実用的に）',
-    '- days[].theme: その日のねらい',
-    '- days[].items[]: title(候補と一致), time(目安の時刻 例"10:00"), category, why(おすすめ理由・魅力を具体的に40〜80字), tips(楽しみ方/食べるべき物/回り方を具体的に40〜80字), duration(滞在目安 例"1.5時間"), alt(雨天や時間が無い時の代替案を一言)',
-    '同じ場所を複数日に重複させないこと。JSONのみ出力。',
+    '- advice: 旅行全体を楽しむコツを4〜5個（移動手段・服装・時間帯・予約・持ち物など実用的に）',
+    '- days[].theme: その日のねらいを一言',
+    '- days[].items[] 各フィールド:',
+    '   title(候補と完全一致), time(目安の時刻 例"10:00"), category,',
+    '   why: なぜおすすめかを80〜140字の自然な文章で。何が見どころで、どんな人・気分に向くかまで具体的に。',
+    '   tips: 楽しみ方を80〜140字で具体的に。回り方・名物や食べるべき物・写真スポット・ベストな時間帯など。',
+    '   access: 行き方を一言（最寄り駅/バス停・そこからの所要や手段。例「箱根登山バスで〇分」）。',
+    '   duration: 滞在の目安（例"1.5時間"）。 alt: 雨天や時間が無い時の代替案。',
+    '- 各日、可能ならランチまたはカフェ（グルメ/宿泊カテゴリや飲食系の候補）を1件は組み込む。',
+    '同じ場所を複数日で重複させない。候補に無い場所は作らない。JSONのみ出力。',
   ].join('\n');
 
   try {
@@ -122,6 +130,7 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
           price: rec?.price ?? undefined,
           why: cleanStr(it?.why),
           tips: cleanStr(it?.tips),
+          access: cleanStr(it?.access),
           duration: cleanStr(it?.duration),
           alt: cleanStr(it?.alt),
         });

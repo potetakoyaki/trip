@@ -96,6 +96,8 @@ export interface PlanItem {
   why?: string;
   /** 楽しみ方・回り方のコツ。 */
   tips?: string;
+  /** 行き方・アクセス。 */
+  access?: string;
   /** 目安の滞在時間。 */
   duration?: string;
   /** 雨天や時間が無いときの代替案。 */

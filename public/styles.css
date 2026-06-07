@@ -484,14 +484,16 @@ select:focus {
   color: var(--ink);
 }
 .why,
-.tips {
+.tips,
+.access {
   margin: 8px 0 0;
-  font-size: 0.88rem;
-  line-height: 1.6;
+  font-size: 0.9rem;
+  line-height: 1.7;
   color: var(--ink-soft);
 }
 .why b,
-.tips b {
+.tips b,
+.access b {
   display: inline-block;
   margin-right: 6px;
   font-size: 0.74rem;
@@ -499,6 +501,7 @@ select:focus {
   padding: 1px 8px;
   border-radius: 6px;
   vertical-align: 1px;
+  white-space: nowrap;
 }
 .why b {
   background: #eef2ff;
@@ -507,6 +510,10 @@ select:focus {
 .tips b {
   background: #fff7ed;
   color: #c2410c;
+}
+.access b {
+  background: #ecfdf5;
+  color: #047857;
 }
 .item-sub {
   margin-top: 9px;

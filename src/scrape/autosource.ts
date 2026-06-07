@@ -12,7 +12,7 @@ export interface DiscoverResult {
   note?: string;
 }
 
-const MAX_PAGES = 4; // 1エリアあたりに扱う大手サイト/ブログのページ数
+const MAX_PAGES = 6; // 1エリアあたりに扱う大手サイト/ブログのページ数
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -41,26 +41,33 @@ export async function discoverAndScrape(
   let candidates = 0;
 
   // 1) Jina 検索（検索＋本文取得を一度に。キー不要・サーバーIPで動作）
+  //    クエリ（観光/グルメ/モデルコース）ごとに上位2件ずつ取り、偏りを防ぐ。
   for (const q of queries) {
     if (docs.length >= MAX_PAGES) break;
     const results = await jinaSearch(http, env, q);
     if (results.length) {
       engine = 'jina';
       candidates += results.length;
-      pushDocs(docs, results);
+      pushDocs(docs, results.slice(0, 2));
     }
   }
 
   // 2) フォールバック: 他検索でURLを発見 → Jina Reader/直接で本文取得
   if (!docs.length) {
-    const urls: string[] = [];
+    // クエリごとの結果を交互に並べ、グルメ系クエリの結果も確実に拾う
+    const perQuery: string[][] = [];
     for (const q of queries) {
       const s = await searchWeb(http, env, q);
       if (s.urls.length) {
         engine = s.engine;
-        for (const u of s.urls) if (!urls.includes(u)) urls.push(u);
+        perQuery.push(s.urls);
       }
-      if (urls.length >= 12) break;
+    }
+    const urls: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      for (const list of perQuery) {
+        if (list[i] && !urls.includes(list[i])) urls.push(list[i]);
+      }
     }
     candidates = urls.length;
     const seenHost = new Set<string>();
@@ -272,7 +279,11 @@ export function extractBingLinks(html: string): string[] {
 }
 
 function buildQueries(area: string, interests?: string[]): string[] {
-  const queries = [`${area} 観光 おすすめ スポット`, `${area} 旅行 ブログ おすすめ`];
+  const queries = [
+    `${area} 観光 おすすめ スポット`,
+    `${area} グルメ カフェ ランチ 名物 おすすめ`,
+    `${area} 旅行 ブログ モデルコース`,
+  ];
   if (interests && interests.length) {
     queries.push(`${area} ${interests.slice(0, 2).join(' ')} おすすめ`);
   }

@@ -171,6 +171,7 @@ function renderItem(it) {
   const detail = [];
   if (it.why) detail.push(`<p class="why"><b>💡 おすすめ</b>${esc(it.why)}</p>`);
   if (it.tips) detail.push(`<p class="tips"><b>🎯 楽しみ方</b>${esc(it.tips)}</p>`);
+  if (it.access) detail.push(`<p class="access"><b>🚃 行き方</b>${esc(it.access)}</p>`);
   const sub = [];
   if (it.duration) sub.push(`⏱ 滞在目安 ${esc(it.duration)}`);
   if (it.alt) sub.push(`🔄 ${esc(it.alt)}`);
