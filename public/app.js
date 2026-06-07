@@ -1203,9 +1203,6 @@ function renderEval() {
   </div>`;
 }
 
-// 中カテゴリー（既存category）の表示順
-const CAT_ORDER = ['観光', '歴史', 'アート', '自然', '体験', 'グルメ', 'イベント', '祭り', '音楽', 'テック', '宿泊'];
-
 // 大カテゴリー（中カテゴリーをまとめる括り）
 const MAJOR_CATS = [
   { name: '観光・体験', emoji: '🗺️', mids: ['観光', '歴史', 'アート', '自然', '体験'] },
@@ -1217,6 +1214,38 @@ function majorOf(mid) {
   for (const m of MAJOR_CATS) if (m.mids.includes(mid)) return m;
   return { name: 'その他', emoji: '📍', mids: [] };
 }
+
+// 宿泊カテゴリーを、名称からホテル/旅館などの中カテゴリーに振り分ける。
+const ACCOM_TYPES = ['ホテル', '旅館', 'リゾート', 'ペンション', '民宿', 'ゲストハウス', 'コテージ', 'その他の宿'];
+const ACCOM_EMOJI = {
+  ホテル: '🏨',
+  旅館: '♨️',
+  リゾート: '🏝️',
+  ペンション: '🏡',
+  民宿: '🏠',
+  ゲストハウス: '🛏️',
+  コテージ: '🏕️',
+  その他の宿: '🛏️',
+};
+function accommodationType(title) {
+  const t = String(title || '');
+  if (/旅館|旅亭|温泉宿|湯宿/.test(t)) return '旅館';
+  if (/ホテル|HOTEL|Hotel/.test(t)) return 'ホテル';
+  if (/リゾート|RESORT|Resort|グランピング/.test(t)) return 'リゾート';
+  if (/ペンション/.test(t)) return 'ペンション';
+  if (/民宿/.test(t)) return '民宿';
+  if (/ゲストハウス|ホステル|hostel|guesthouse/i.test(t)) return 'ゲストハウス';
+  if (/コテージ|ヴィラ|villa/i.test(t)) return 'コテージ';
+  return 'その他の宿';
+}
+// 中カテゴリーの絵文字（宿泊の細分は専用、その他は通常カテゴリー絵文字）。
+function midEmoji(mid) {
+  return ACCOM_EMOJI[mid] || catEmoji(mid);
+}
+// 中カテゴリーの並び順（宿泊の細分も含む）。
+const MID_ORDER = ['観光', '歴史', 'アート', '自然', '体験', 'グルメ', 'イベント', '祭り', '音楽', 'テック'].concat(
+  ACCOM_TYPES,
+);
 
 function candCard(c, idx) {
   const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
@@ -1249,11 +1278,17 @@ function renderCandidates(candidates) {
     el.innerHTML = '';
     return;
   }
-  // 大 → 中 → [{c, i}]
+  // 大 → 中 → [{c, i}]。宿泊は名称からホテル/旅館などの中カテゴリーに分ける。
   const majors = {};
   currentCandidates.forEach((c, i) => {
-    const mid = c.category || 'その他';
-    const major = majorOf(mid).name;
+    let mid = c.category || 'その他';
+    let major;
+    if (c.category === '宿泊') {
+      major = '宿泊';
+      mid = accommodationType(c.title);
+    } else {
+      major = majorOf(mid).name;
+    }
     majors[major] = majors[major] || {};
     (majors[major][mid] = majors[major][mid] || []).push({ c, i });
   });
@@ -1266,15 +1301,15 @@ function renderCandidates(candidates) {
       const mids = majors[mName];
       const total = Object.values(mids).reduce((n, arr) => n + arr.length, 0);
       const midKeys = Object.keys(mids).sort((a, b) => {
-        const ia = CAT_ORDER.indexOf(a);
-        const ib = CAT_ORDER.indexOf(b);
+        const ia = MID_ORDER.indexOf(a);
+        const ib = MID_ORDER.indexOf(b);
         return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
       });
       const midHtml = midKeys
         .map((mid) => {
           const cards = mids[mid].map(({ c, i }) => candCard(c, i)).join('');
           return `<details class="mid-group">
-            <summary><span class="mid-name">${catEmoji(mid)} ${esc(mid)}</span><span class="cat-count">${mids[mid].length}</span></summary>
+            <summary><span class="mid-name">${midEmoji(mid)} ${esc(mid)}</span><span class="cat-count">${mids[mid].length}</span></summary>
             <div class="cand-list">${cards}</div>
           </details>`;
         })
