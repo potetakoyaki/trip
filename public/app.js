@@ -379,12 +379,16 @@ function renderHotels(hotels) {
       const name = h.url
         ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.name)}</a>`
         : esc(h.name);
+      const link = h.url
+        ? `<a class="hotel-link" href="${esc(h.url)}" target="_blank" rel="noopener">楽天トラベルで見る →</a>`
+        : `<a class="hotel-link" href="https://www.google.com/search?q=${encodeURIComponent(h.name + ' 宿泊 予約')}" target="_blank" rel="noopener">空室・料金を探す →</a>`;
       return `<div class="hotel">
       <div class="hotel-top"><span class="hotel-name">${name}</span>${
         h.nightlyPrice ? `<span class="hotel-price">${yen(h.nightlyPrice)} / 泊・人〜</span>` : ''
       }</div>
       ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
       ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
+      <div class="hotel-actions">${link}</div>
     </div>`;
     })
     .join('');

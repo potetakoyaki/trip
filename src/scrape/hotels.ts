@@ -128,6 +128,10 @@ export async function fetchRakutenHotels(
   origin?: string,
   opts: HotelSearchOpts = {},
 ): Promise<HotelOption[]> {
-  const r = await rakutenHotelSearch(env, area, origin, opts);
+  let r = await rakutenHotelSearch(env, area, origin, opts);
+  // 条件（露天風呂等）で0件になったら、条件を外してエリアだけで再検索し、実ホテルを優先する。
+  if (r.hotels.length === 0 && opts.keywords && opts.keywords.length) {
+    r = await rakutenHotelSearch(env, area, origin, { ...opts, keywords: [] });
+  }
   return r.hotels;
 }

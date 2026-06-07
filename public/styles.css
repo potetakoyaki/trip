@@ -556,6 +556,22 @@ select:focus {
   margin-top: 4px;
   line-height: 1.6;
 }
+.hotel-actions {
+  margin-top: 7px;
+}
+.hotel-link {
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  padding: 6px 14px;
+  border-radius: 9px;
+  text-decoration: none;
+}
+.hotel-link:hover {
+  filter: brightness(1.05);
+}
 .summary-meta {
   margin-top: 8px;
   font-size: 0.9rem;
