@@ -7,6 +7,31 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <button id="menu-btn" class="menu-btn" aria-label="メニュー">☰</button>
+
+    <aside id="drawer" class="drawer hidden" aria-label="メニュー">
+      <div class="drawer-head">
+        <h2>☰ メニュー</h2>
+        <button id="drawer-close" class="drawer-close" aria-label="閉じる">✕</button>
+      </div>
+
+      <section class="drawer-section">
+        <div class="drawer-sec-head">
+          <h3>📚 保存したプラン</h3>
+          <button type="button" id="history-refresh" class="btn-ghost">更新</button>
+        </div>
+        <div id="history-list" class="history-list"></div>
+      </section>
+
+      <section class="drawer-section">
+        <div class="drawer-sec-head">
+          <h3>📍 行った場所</h3>
+        </div>
+        <div id="visited-tree" class="visited-tree"></div>
+      </section>
+    </aside>
+    <div id="drawer-overlay" class="drawer-overlay hidden"></div>
+
     <header class="hero">
       <div class="hero-inner">
         <div class="hero-badge">🧳 Trip Planner</div>
@@ -118,6 +143,10 @@
               <input type="checkbox" id="autoScrape" checked />
               <span>作成時に最新情報を自動収集する</span>
             </label>
+            <label class="switch">
+              <input type="checkbox" id="eco" />
+              <span>🌱 省エネモード（軽量AIで作成・無料枠を節約）</span>
+            </label>
           </div>
 
           <button type="submit" class="btn-primary" id="submit-btn">
@@ -148,14 +177,6 @@
         <div id="plan-summary"></div>
         <div id="plan-days" class="timeline"></div>
         <div id="plan-extra"></div>
-      </section>
-
-      <section id="history-section" class="card hidden">
-        <div class="result-head">
-          <h2 class="section-title">保存したプラン</h2>
-          <button type="button" id="history-refresh" class="btn-ghost">更新</button>
-        </div>
-        <div id="history-list" class="history-list"></div>
       </section>
     </main>
 

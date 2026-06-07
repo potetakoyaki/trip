@@ -6,12 +6,16 @@ import { processOneRound, runPlanJob } from '../scrape/collect-job';
 import { rakutenHotelSearch } from '../scrape/hotels';
 import { createPlan } from '../planner/create-plan';
 import {
+  addVisited,
   createPlanJob,
   createSource,
+  deletePlan,
   deleteSource,
   ensureCoveredTable,
   ensureJobsTable,
   ensurePlanJobs,
+  ensureVisited,
+  findEventPrefecture,
   getCollectedAreas,
   getJob,
   getPlan,
@@ -20,13 +24,15 @@ import {
   insertDemoEvents,
   isCovered,
   listPlans,
+  listVisited,
   markCovered,
+  removeVisited,
   searchEvents,
   startJob,
   updateSource,
 } from '../db/repository';
 import { extractSpotsDiag } from '../scrape/ai-extract';
-import { ALL_CATEGORIES } from '../util/normalize';
+import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
 
@@ -88,6 +94,7 @@ function validatePlanRequest(body: any): { ok: true; req: PlanRequest } | { ok: 
     keyword: str(body.keyword, 80),
     hotelFeatures: strArr(body.hotelFeatures),
     autoScrape: body.autoScrape === false ? false : true,
+    eco: body.eco === true,
     engine: body.engine === 'rule' ? 'rule' : undefined,
   };
   return { ok: true, req };
@@ -405,6 +412,38 @@ api.get('/plans', async (c) => {
   return c.json({ plans });
 });
 
+// 行ったことある場所の一覧（都道府県・エリア別はフロントでグループ化）。
+api.get('/visited', async (c) => {
+  await ensureVisited(c.env.DB);
+  const visited = await listVisited(c.env.DB);
+  return c.json({ visited });
+});
+
+// 行った/未訪問の切り替え。
+api.post('/visited', async (c) => {
+  const body = await c.req.json<any>().catch(() => null);
+  const title = str(body?.title, 120);
+  if (!title) return c.json({ error: 'title が必要です' }, 400);
+  await ensureVisited(c.env.DB);
+  if (body?.visited === false) {
+    await removeVisited(c.env.DB, title);
+    return c.json({ ok: true, visited: false });
+  }
+  const prefecture =
+    str(body?.prefecture, 20) ||
+    (await findEventPrefecture(c.env.DB, title)) ||
+    inferPrefecture(title) ||
+    '未分類';
+  await addVisited(c.env.DB, {
+    title,
+    prefecture,
+    area: str(body?.area, 80),
+    url: str(body?.url, 300),
+    now: new Date().toISOString(),
+  });
+  return c.json({ ok: true, visited: true, prefecture });
+});
+
 api.get('/plan-status', async (c) => {
   const id = c.req.query('id');
   if (!id) return c.json({ error: 'id が必要です' }, 400);
@@ -418,4 +457,11 @@ api.get('/plan/:id', async (c) => {
   const found = await getPlan(c.env.DB, c.req.param('id'));
   if (!found) return c.json({ error: 'not found' }, 404);
   return c.json(found);
+});
+
+// 保存プランを削除する。
+api.delete('/plan/:id', async (c) => {
+  const ok = await deletePlan(c.env.DB, c.req.param('id'));
+  if (!ok) return c.json({ error: 'not found' }, 404);
+  return c.json({ ok: true });
 });

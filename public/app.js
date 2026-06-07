@@ -2,7 +2,9 @@
 
 const $ = (id) => document.getElementById(id);
 const selectedInterests = new Set();
+const visitedSet = new Set();
 let currentPlanId = null;
+let currentArea = '';
 
 const CAT_EMOJI = {
   グルメ: '🍜',
@@ -30,6 +32,90 @@ async function api(path, options) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
+}
+
+// --- 行ったことある場所（visited） ---
+async function loadVisited() {
+  try {
+    const { visited } = await api('/visited');
+    visitedSet.clear();
+    (visited || []).forEach((v) => visitedSet.add(v.title));
+    renderVisitedTree(visited || []);
+  } catch {
+    /* 任意機能 */
+  }
+}
+
+function renderVisitedTree(rows) {
+  const el = $('visited-tree');
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML =
+      '<p class="visited-empty">まだありません。プランやスポット一覧の「行った」にチェックすると、ここに<strong>都道府県＞エリア別</strong>でたまります。</p>';
+    return;
+  }
+  // 都道府県 → エリア → スポット の階層に
+  const byPref = {};
+  rows.forEach((r) => {
+    const pref = r.prefecture || '未分類';
+    const area = r.area || 'その他';
+    byPref[pref] = byPref[pref] || {};
+    byPref[pref][area] = byPref[pref][area] || [];
+    byPref[pref][area].push(r);
+  });
+  el.innerHTML = Object.keys(byPref)
+    .sort()
+    .map((pref) => {
+      const areas = byPref[pref];
+      const count = Object.values(areas).reduce((n, a) => n + a.length, 0);
+      const areaHtml = Object.keys(areas)
+        .sort()
+        .map((area) => {
+          const spots = areas[area]
+            .map((s) => {
+              const name = s.url
+                ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`
+                : esc(s.title);
+              return `<div class="vt-spot"><span>${name}</span><button type="button" class="vt-remove" data-title="${esc(s.title)}">削除</button></div>`;
+            })
+            .join('');
+          return `<div class="vt-area"><div class="vt-area-name">${esc(area)}</div>${spots}</div>`;
+        })
+        .join('');
+      return `<details class="vt-pref" open><summary>${esc(pref)}<span class="vt-pref-count">${count}件</span></summary>${areaHtml}</details>`;
+    })
+    .join('');
+}
+
+async function toggleVisited(title, on, opts = {}) {
+  if (on) visitedSet.add(title);
+  else visitedSet.delete(title);
+  try {
+    await api('/visited', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, visited: on, area: opts.area, prefecture: opts.prefecture, url: opts.url }),
+    });
+  } catch {
+    /* ignore */
+  }
+  loadVisited();
+}
+
+function visitedCheckbox(title, prefecture, url) {
+  const checked = visitedSet.has(title) ? 'checked' : '';
+  return `<label class="visited-check"><input type="checkbox" class="visited-cb" data-title="${esc(title)}" data-pref="${esc(prefecture || '')}" data-url="${esc(url || '')}" ${checked}> 行った</label>`;
+}
+
+function openDrawer() {
+  $('drawer').classList.remove('hidden');
+  $('drawer-overlay').classList.remove('hidden');
+  loadHistory();
+  loadVisited();
+}
+function closeDrawer() {
+  $('drawer').classList.add('hidden');
+  $('drawer-overlay').classList.add('hidden');
 }
 
 // --- dates ---
@@ -95,6 +181,7 @@ function fillForm(req) {
   document.querySelectorAll('.hotel-feat').forEach((c) => {
     c.checked = feats.has(c.value);
   });
+  $('eco').checked = !!req.eco;
 }
 
 async function sharePlan() {
@@ -116,6 +203,7 @@ async function loadSharedPlan(id) {
     await loadCategories(d.request && d.request.interests);
     fillForm(d.request);
     currentPlanId = d.id;
+    currentArea = (d.request && d.request.area) || '';
     renderPlan({ plan: d.result });
     $('share-btn').classList.remove('hidden');
     setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
@@ -290,6 +378,7 @@ function buildPlanBody() {
     keyword: $('keyword').value.trim() || undefined,
     hotelFeatures: getHotelFeatures(),
     autoScrape: $('autoScrape').checked,
+    eco: $('eco').checked,
   };
 }
 
@@ -436,6 +525,7 @@ async function loadAndRenderSavedPlan(planId) {
   const d = await api('/plan/' + encodeURIComponent(planId));
   currentPlanId = d.id;
   fillForm(d.request);
+  currentArea = (d.request && d.request.area) || '';
   renderPlan({ plan: d.result });
   $('share-btn').classList.remove('hidden');
   const area = d.request && d.request.area;
@@ -455,6 +545,7 @@ async function loadAndRenderSavedPlan(planId) {
           title: e.title,
           category: e.category,
           location: e.city || e.prefecture || e.location_name,
+          prefecture: e.prefecture,
           url: e.url,
           price: e.price,
           description: e.description,
@@ -521,7 +612,8 @@ function renderCandidates(candidates) {
         (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰 情報元</a>` : '');
       return `<details class="cand">
         <summary><span class="cand-name">${esc(c.title)}</span>${cat}${price}</summary>
-        <div class="cand-body">${loc}${desc}<div class="cand-links">${links}</div></div>
+        <div class="cand-body">${loc}${desc}<div class="cand-links">${links}</div>
+          <div class="item-foot">${visitedCheckbox(c.title, c.prefecture, c.url)}</div></div>
       </details>`;
     })
     .join('');
@@ -654,28 +746,41 @@ function renderForecast(fc) {
 }
 
 async function loadHistory() {
+  const list = $('history-list');
+  if (!list) return;
   try {
     const { plans } = await api('/plans');
-    const sec = $('history-section');
-    const list = $('history-list');
     if (!plans || !plans.length) {
-      sec.classList.add('hidden');
+      list.innerHTML =
+        '<p class="visited-empty">まだ保存されたプランはありません。プランを作成すると、ここに履歴がたまります。</p>';
       return;
     }
-    sec.classList.remove('hidden');
     list.innerHTML = plans
       .map((p) => {
         const title = esc(p.theme || p.area || 'プラン');
         const dates = p.startDate ? `${p.startDate}〜${p.endDate || ''}` : '';
         const when = p.createdAt ? new Date(p.createdAt).toLocaleString('ja-JP') : '';
-        return `<button type="button" class="hist-item" data-id="${esc(p.id)}">
-          <span class="hist-title">${title}</span>
-          <span class="hist-sub">${esc(p.area || '')} ${dates}<br>${when}</span>
-        </button>`;
+        return `<div class="hist-item">
+          <button type="button" class="hist-open" data-id="${esc(p.id)}">
+            <span class="hist-title">${title}</span>
+            <span class="hist-sub">${esc(p.area || '')} ${dates}<br>${when}</span>
+          </button>
+          <button type="button" class="hist-del" data-id="${esc(p.id)}" title="削除" aria-label="削除">🗑</button>
+        </div>`;
       })
       .join('');
   } catch {
     /* 履歴は任意 */
+  }
+}
+
+async function deleteSavedPlan(id) {
+  if (!confirm('この保存プランを削除しますか？')) return;
+  try {
+    await api('/plan/' + encodeURIComponent(id), { method: 'DELETE' });
+    loadHistory();
+  } catch (e) {
+    setStatus('削除に失敗: ' + e.message, 'err');
   }
 }
 
@@ -712,7 +817,10 @@ function renderItem(it) {
       ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
       ${detail.join('')}
       ${sub.length ? `<div class="item-sub">${sub.join('　·　')}</div>` : ''}
-      <div class="item-links">${links.join('')}</div>
+      <div class="item-foot">
+        <div class="item-links">${links.join('')}</div>
+        ${visitedCheckbox(it.title, it.prefecture, it.url)}
+      </div>
     </div>`;
 }
 
@@ -736,17 +844,50 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('plan-form').addEventListener('submit', submitPlan);
   $('collect-btn').addEventListener('click', deepCollect);
   $('share-btn').addEventListener('click', sharePlan);
+
+  // ハンバーガーメニュー（保存プラン・行った場所）の開閉。
+  $('menu-btn').addEventListener('click', openDrawer);
+  $('drawer-close').addEventListener('click', closeDrawer);
+  $('drawer-overlay').addEventListener('click', closeDrawer);
+
   $('history-refresh').addEventListener('click', loadHistory);
   $('history-list').addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.hist-item');
-    if (btn && btn.dataset.id) loadAndRenderSavedPlan(btn.dataset.id);
+    const del = ev.target.closest('.hist-del');
+    if (del && del.dataset.id) {
+      deleteSavedPlan(del.dataset.id);
+      return;
+    }
+    const open = ev.target.closest('.hist-open');
+    if (open && open.dataset.id) {
+      closeDrawer();
+      loadAndRenderSavedPlan(open.dataset.id);
+    }
   });
+
+  // 行った場所ツリーの「削除」。
+  $('visited-tree').addEventListener('click', (ev) => {
+    const rm = ev.target.closest('.vt-remove');
+    if (rm && rm.dataset.title) toggleVisited(rm.dataset.title, false);
+  });
+
+  // スポット一覧・プラン内の「行った」チェック（イベント委譲）。
+  document.addEventListener('change', (ev) => {
+    const cb = ev.target.closest('.visited-cb');
+    if (!cb) return;
+    toggleVisited(cb.dataset.title, cb.checked, {
+      area: currentArea,
+      prefecture: cb.dataset.pref,
+      url: cb.dataset.url,
+    });
+  });
+
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;
     if (s) $('endDate').value = addDays(s, 1);
   });
 
   loadHistory();
+  loadVisited();
 
   const sharedId = new URLSearchParams(location.search).get('plan');
   if (sharedId) {

@@ -955,41 +955,225 @@ select:focus {
   text-decoration: underline;
 }
 
-/* plan history */
-.history-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* plan history (in drawer) */
+.drawer-section {
+  margin-bottom: 22px;
+}
+.drawer-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
+  margin-bottom: 10px;
+}
+.drawer-sec-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ink);
+}
+.drawer-sec-head .btn-ghost {
+  padding: 5px 11px;
+  font-size: 0.78rem;
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .hist-item {
-  text-align: left;
+  display: flex;
+  align-items: stretch;
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 12px;
-  padding: 12px 14px;
+  overflow: hidden;
+}
+.hist-item:hover {
+  border-color: var(--brand);
+}
+.hist-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 11px 13px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.hist-item:hover {
-  border-color: var(--brand);
+.hist-open:hover {
   background: #f8faff;
 }
 .hist-title {
   font-weight: 700;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   color: var(--ink);
 }
 .hist-sub {
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   color: var(--muted);
   line-height: 1.5;
 }
-@media (max-width: 540px) {
-  .history-list {
-    grid-template-columns: 1fr;
-  }
+.hist-del {
+  flex: 0 0 auto;
+  border: none;
+  border-left: 1px solid var(--line);
+  background: #fff;
+  color: var(--err);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 13px;
+}
+.hist-del:hover {
+  background: var(--err-bg);
+}
+
+/* hamburger menu + drawer */
+.menu-btn {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 40;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 1.3rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.menu-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 50;
+}
+.drawer-overlay.hidden {
+  display: none;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 60;
+  width: min(360px, 88vw);
+  height: 100%;
+  background: #fff;
+  box-shadow: -10px 0 30px rgba(15, 23, 42, 0.2);
+  padding: 18px;
+  overflow-y: auto;
+  transform: translateX(0);
+  transition: transform 0.22s ease;
+}
+.drawer.hidden {
+  transform: translateX(105%);
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.drawer-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.drawer-close {
+  border: none;
+  background: #f1f5f9;
+  border-radius: 9px;
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.visited-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+.vt-pref > summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--brand-ink);
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.vt-pref > summary::-webkit-details-marker {
+  display: none;
+}
+.vt-pref-count {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  margin-left: 6px;
+}
+.vt-area {
+  margin: 6px 0 6px 10px;
+}
+.vt-area-name {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  margin: 6px 0 2px;
+}
+.vt-spot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0 5px 10px;
+  font-size: 0.88rem;
+  border-bottom: 1px dashed var(--line);
+}
+.vt-spot a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.vt-spot a:hover {
+  color: var(--brand-ink);
+  text-decoration: underline;
+}
+.vt-remove {
+  border: none;
+  background: none;
+  color: var(--err);
+  cursor: pointer;
+  font-size: 0.8rem;
+  flex: 0 0 auto;
+}
+
+/* visited checkbox on spots */
+.visited-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+  margin: 0;
+}
+.visited-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ok);
+  cursor: pointer;
+}
+.item-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 /* ---------- Footer ---------- */

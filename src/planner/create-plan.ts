@@ -80,6 +80,7 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
     title: e.title,
     category: e.category ?? undefined,
     location: e.location_name ?? e.city ?? e.prefecture ?? undefined,
+    prefecture: e.prefecture ?? undefined,
     url: e.url ?? undefined,
     price: e.price ?? undefined,
     description: e.description ?? undefined,
