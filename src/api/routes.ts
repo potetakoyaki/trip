@@ -19,6 +19,7 @@ import {
   getSources,
   insertDemoEvents,
   isCovered,
+  listPlans,
   markCovered,
   searchEvents,
   startJob,
@@ -398,6 +399,12 @@ api.post('/plan/start', async (c) => {
 });
 
 // プラン作成ジョブの進捗を取得する。
+// 保存プランの履歴一覧。
+api.get('/plans', async (c) => {
+  const plans = await listPlans(c.env.DB, 20);
+  return c.json({ plans });
+});
+
 api.get('/plan-status', async (c) => {
   const id = c.req.query('id');
   if (!id) return c.json({ error: 'id が必要です' }, 400);

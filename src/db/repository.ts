@@ -371,6 +371,39 @@ export async function savePlan(
     .run();
 }
 
+/** 直近の保存プラン一覧（履歴）。 */
+export async function listPlans(
+  db: D1Database,
+  limit = 20,
+): Promise<{ id: string; createdAt: string; area?: string; startDate?: string; endDate?: string; theme?: string }[]> {
+  const { results } = await db
+    .prepare('SELECT id, created_at, request, result FROM plans ORDER BY created_at DESC LIMIT ?')
+    .bind(Math.min(limit, 50))
+    .all();
+  return (results as any[]).map((r) => {
+    let req: any = {};
+    let res: any = {};
+    try {
+      req = JSON.parse(r.request);
+    } catch {
+      /* ignore */
+    }
+    try {
+      res = JSON.parse(r.result);
+    } catch {
+      /* ignore */
+    }
+    return {
+      id: r.id,
+      createdAt: r.created_at,
+      area: req?.area,
+      startDate: req?.startDate,
+      endDate: req?.endDate,
+      theme: res?.theme,
+    };
+  });
+}
+
 export async function getPlan(
   db: D1Database,
   id: string,

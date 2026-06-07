@@ -3,6 +3,7 @@ import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
 import { fetchRakutenHotels } from '../scrape/hotels';
 import { searchEvents, savePlan } from '../db/repository';
+import { fetchForecast } from '../scrape/weather';
 import { generatePlan } from './planner';
 
 export interface CreatePlanResult {
@@ -66,6 +67,14 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
   }
 
   const plan = await generatePlan(env, events, body, { hotels: realHotels });
+
+  // 旅行日の天気予報（無料・キー不要）。取得できたら付与。
+  try {
+    const forecast = await fetchForecast(body.area ?? '', body.startDate, body.endDate);
+    if (forecast.length) plan.forecast = forecast;
+  } catch {
+    /* 天気は任意 */
+  }
 
   const candidates = events.slice(0, 80).map((e) => ({
     title: e.title,

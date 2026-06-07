@@ -413,6 +413,7 @@ async function pollPlanJob(jobId) {
       setBusy(false);
       await loadAndRenderSavedPlan(s.planId);
       setStatus('プランが完成しました 🎉', 'ok');
+      loadHistory();
       return;
     }
     if (s.found && s.status === 'error') {
@@ -482,6 +483,7 @@ function renderPlan(data) {
     : '';
 
   let html = `<div class="summary-box">${theme}${summaryText}${highlights}</div>`;
+  if (plan.forecast && plan.forecast.length) html += renderForecast(plan.forecast);
   if (plan.travel) html += renderTravel(plan.travel);
   if (plan.costBreakdown) html += renderCost(plan.costBreakdown);
   if (plan.hotels && plan.hotels.length) html += renderHotels(plan.hotels);
@@ -594,10 +596,23 @@ function renderHotels(hotels) {
   </div>`;
 }
 
+function dayRouteLink(items) {
+  const pts = (items || []).map((it) => `${it.title} ${it.location || ''}`.trim()).filter(Boolean);
+  if (pts.length < 2) return '';
+  const enc = pts.slice(0, 10).map(encodeURIComponent);
+  const origin = enc[0];
+  const destination = enc[enc.length - 1];
+  const wp = enc.slice(1, -1).join('%7C');
+  let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+  if (wp) url += `&waypoints=${wp}`;
+  return `<a class="day-route" href="${url}" target="_blank" rel="noopener">🗺 この日のルートを地図で見る</a>`;
+}
+
 function renderDay(day, i) {
   const d = new Date(day.date + 'T00:00:00');
   const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
   const dayTheme = day.theme ? `<div class="day-theme">${esc(day.theme)}</div>` : '';
+  const route = dayRouteLink(day.items);
   const items = day.items.length
     ? day.items.map(renderItem).join('')
     : '<div class="empty-day">この日の候補は見つかりませんでした。条件をゆるめてみてください。</div>';
@@ -610,8 +625,58 @@ function renderDay(day, i) {
           ${dayTheme}
         </div>
       </div>
+      ${route ? `<div class="day-route-wrap">${route}</div>` : ''}
       <div class="items">${items}</div>
     </div>`;
+}
+
+function renderForecast(fc) {
+  const days = fc
+    .map((day) => {
+      const dd = new Date(day.date + 'T00:00:00');
+      const md = `${dd.getMonth() + 1}/${dd.getDate()}`;
+      const temp = (day.tmax != null ? `${day.tmax}°` : '') + (day.tmin != null ? `/${day.tmin}°` : '');
+      const pop = day.pop != null ? `☔${day.pop}%` : '';
+      return `<div class="fc-day">
+        <div class="fc-date">${md}</div>
+        <div class="fc-emoji">${day.emoji}</div>
+        <div class="fc-label">${esc(day.label)}</div>
+        <div class="fc-temp">${temp}</div>
+        <div class="fc-pop">${pop}</div>
+      </div>`;
+    })
+    .join('');
+  return `<div class="info-card">
+    <div class="info-h">🌤️ 旅行日の天気予報</div>
+    <div class="fc-row">${days}</div>
+    <p class="info-note">出典: Open-Meteo（無料）。日が近づくと精度が上がります。</p>
+  </div>`;
+}
+
+async function loadHistory() {
+  try {
+    const { plans } = await api('/plans');
+    const sec = $('history-section');
+    const list = $('history-list');
+    if (!plans || !plans.length) {
+      sec.classList.add('hidden');
+      return;
+    }
+    sec.classList.remove('hidden');
+    list.innerHTML = plans
+      .map((p) => {
+        const title = esc(p.theme || p.area || 'プラン');
+        const dates = p.startDate ? `${p.startDate}〜${p.endDate || ''}` : '';
+        const when = p.createdAt ? new Date(p.createdAt).toLocaleString('ja-JP') : '';
+        return `<button type="button" class="hist-item" data-id="${esc(p.id)}">
+          <span class="hist-title">${title}</span>
+          <span class="hist-sub">${esc(p.area || '')} ${dates}<br>${when}</span>
+        </button>`;
+      })
+      .join('');
+  } catch {
+    /* 履歴は任意 */
+  }
 }
 
 function renderItem(it) {
@@ -671,10 +736,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('plan-form').addEventListener('submit', submitPlan);
   $('collect-btn').addEventListener('click', deepCollect);
   $('share-btn').addEventListener('click', sharePlan);
+  $('history-refresh').addEventListener('click', loadHistory);
+  $('history-list').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.hist-item');
+    if (btn && btn.dataset.id) loadAndRenderSavedPlan(btn.dataset.id);
+  });
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;
     if (s) $('endDate').value = addDays(s, 1);
   });
+
+  loadHistory();
 
   const sharedId = new URLSearchParams(location.search).get('plan');
   if (sharedId) {
