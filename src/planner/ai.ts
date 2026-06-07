@@ -6,6 +6,24 @@ const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const ECO_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 const PER_DAY: Record<NonNullable<PlanRequest['pace']>, number> = { relaxed: 2, normal: 3, packed: 4 };
 
+/** AIの無料枠（トークン/ニューロン）切れ・利用上限を表すエラー。これはフォールバックせず上位へ伝える。 */
+export class AiQuotaError extends Error {
+  constructor() {
+    super(
+      'AIが利用できませんでした（本日の無料利用枠の上限に達したか、混雑の可能性があります）。日付が変わると枠は回復します。時間をおいて再度お試しください。省エネモードにすると消費を抑えられます。',
+    );
+    this.name = 'AiQuotaError';
+  }
+}
+
+/** AI呼び出しのエラーが「無料枠切れ・利用上限・レート超過」かを判定する。 */
+function isAiLimitError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e ?? '')).toLowerCase();
+  return /neuron|quota|exceed|too many requests|\b429\b|rate.?limit|limit reached|out of (credit|capacity)|insufficient|allocation|daily limit|capacity|\b3040\b/.test(
+    msg,
+  );
+}
+
 const SCHEMA = {
   type: 'object',
   properties: {
@@ -147,8 +165,9 @@ export async function generateAiPlan(
   // 省エネモードでは軽量モデルを使い、Neuron消費を抑える。
   const model = req.eco ? ECO_MODEL : MODEL;
 
+  let res: { response?: unknown };
   try {
-    const res = (await env.AI.run(model, {
+    res = (await env.AI.run(model, {
       messages: [
         { role: 'system', content: sys },
         { role: 'user', content: user },
@@ -156,7 +175,14 @@ export async function generateAiPlan(
       max_tokens: 3000,
       response_format: { type: 'json_schema', json_schema: SCHEMA },
     })) as { response?: unknown };
+  } catch (e) {
+    // 無料枠（トークン/ニューロン）切れ・利用上限のときは、弱いルールベースに退避せず
+    // 明確なエラーとして上位（ジョブ）へ返す。それ以外の一時的エラーは従来通り退避。
+    if (isAiLimitError(e)) throw new AiQuotaError();
+    return generateRulePlan(events, req);
+  }
 
+  try {
     const parsed = coerce(res?.response);
     if (!parsed || !Array.isArray(parsed.days)) throw new Error('AI応答を解釈できませんでした');
 
