@@ -158,7 +158,6 @@ async function submitPlan(ev) {
     renderPlan(data);
     let extra = '';
     if (data.scrape && data.scrape.ran) extra = ` / 最新取得 ${data.scrape.total} 件`;
-    else if (data.scrape && data.scrape.lastRunAt) extra = ' / 取得は最近済みのためスキップ';
     setStatus(`完成（候補 ${data.candidateCount} 件 / エンジン: ${data.plan.engine}${extra}）`, 'ok');
     if (autoScrape) loadSources();
   } catch (e) {

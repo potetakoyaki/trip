@@ -30,7 +30,8 @@ export class HttpClient {
 
   constructor(opts: { userAgent?: string; minIntervalMs?: number } = {}) {
     this.userAgent = opts.userAgent ?? 'TripPlannerBot/0.1 (personal use)';
-    this.minIntervalMs = opts.minIntervalMs ?? 1200;
+    // 同一ホストへの最低アクセス間隔（既定3秒）。相手サーバーへの配慮。
+    this.minIntervalMs = opts.minIntervalMs ?? 3000;
   }
 
   async getText(url: string, opts: GetOptions = {}): Promise<string> {

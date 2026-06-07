@@ -21,7 +21,8 @@ export const jsonldDriver: Driver = {
     const cfg = source.config as { pageUrls?: string[]; prefecture?: string; ignoreRobots?: boolean };
     const all: NormalizedEvent[] = [];
     for (const url of cfg.pageUrls ?? []) {
-      const html = await ctx.http.getText(url, { cacheTtl: 1800, skipRobots: cfg.ignoreRobots === true });
+      // キャッシュは使わず毎回取得する（再取得の制限なし）。レート制限で配慮。
+      const html = await ctx.http.getText(url, { skipRobots: cfg.ignoreRobots === true });
       const scripts = await extractJsonLdScripts(html);
       all.push(...parseJsonLdEvents(scripts, { prefecture: cfg.prefecture }));
     }

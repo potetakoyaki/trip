@@ -4,7 +4,6 @@ import { runScrape } from '../scrape/runner';
 import {
   createSource,
   deleteSource,
-  getLastScrapeAt,
   getPlan,
   getSources,
   insertDemoEvents,
@@ -129,22 +128,13 @@ api.post('/plan', async (c) => {
     return c.json({ error: 'startDate と endDate は必須です' }, 400);
   }
 
-  // プラン作成時に最新情報を自動取得する。ただし相手サイトへの配慮として、
-  // 直近 FRESH_MS 以内に取得済みならスキップ（HTTPキャッシュも併用される）。
+  // プラン作成のたびに毎回、最新情報を取得してから組み立てる（再取得の制限なし）。
+  // 相手サーバーへの配慮はレート制限（ホスト別3秒間隔）・逐次処理・robots遵守で担保する。
   // スクレイピングが失敗してもプラン作成は止めない（runScrape は例外を投げない）。
-  const FRESH_MS = 10 * 60 * 1000;
-  let scrape: { ran: boolean; total?: number; results?: unknown; lastRunAt?: string | null } = {
-    ran: false,
-  };
+  let scrape: { ran: boolean; total?: number; results?: unknown } = { ran: false };
   if (body.autoScrape !== false) {
-    const last = await getLastScrapeAt(c.env.DB);
-    const stale = !last || Date.now() - Date.parse(last) > FRESH_MS;
-    if (stale) {
-      const summary = await runScrape(c.env);
-      scrape = { ran: true, total: summary.total, results: summary.results };
-    } else {
-      scrape = { ran: false, lastRunAt: last };
-    }
+    const summary = await runScrape(c.env);
+    scrape = { ran: true, total: summary.total, results: summary.results };
   }
 
   // 候補イベントを取得（日付不明のスポット/宿も含まれる）

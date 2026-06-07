@@ -26,9 +26,9 @@ export const rssDriver: Driver = {
     const urls = cfg.feedUrls ?? (cfg.feedUrl ? [cfg.feedUrl] : []);
     const all: NormalizedEvent[] = [];
     for (const url of urls) {
+      // キャッシュは使わず毎回取得する（再取得の制限なし）。レート制限で配慮。
       const xml = await ctx.http.getText(url, {
         accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
-        cacheTtl: 1800,
         skipRobots: cfg.ignoreRobots === true,
       });
       all.push(...parseRss(xml, { category: cfg.category, prefecture: cfg.prefecture }));

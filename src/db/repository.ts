@@ -84,14 +84,6 @@ export async function deleteSource(db: D1Database, id: string): Promise<boolean>
   return (res.meta?.changes ?? 0) > 0;
 }
 
-/** 有効なソースの最終実行時刻のうち最も新しいもの（自動取得の鮮度判定用）。 */
-export async function getLastScrapeAt(db: D1Database): Promise<string | null> {
-  const row = await db
-    .prepare('SELECT MAX(last_run_at) AS t FROM sources WHERE enabled = 1')
-    .first<{ t: string | null }>();
-  return row?.t ?? null;
-}
-
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */
 export async function upsertEvents(
   db: D1Database,
