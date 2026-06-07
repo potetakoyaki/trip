@@ -18,10 +18,10 @@ export const jsonldDriver: Driver = {
   },
 
   async run(ctx: RunContext, source: SourceRow): Promise<NormalizedEvent[]> {
-    const cfg = source.config as { pageUrls?: string[]; prefecture?: string };
+    const cfg = source.config as { pageUrls?: string[]; prefecture?: string; ignoreRobots?: boolean };
     const all: NormalizedEvent[] = [];
     for (const url of cfg.pageUrls ?? []) {
-      const html = await ctx.http.getText(url, { cacheTtl: 1800 });
+      const html = await ctx.http.getText(url, { cacheTtl: 1800, skipRobots: cfg.ignoreRobots === true });
       const scripts = await extractJsonLdScripts(html);
       all.push(...parseJsonLdEvents(scripts, { prefecture: cfg.prefecture }));
     }

@@ -21,6 +21,7 @@ export const rssDriver: Driver = {
       feedUrls?: string[];
       category?: string;
       prefecture?: string;
+      ignoreRobots?: boolean;
     };
     const urls = cfg.feedUrls ?? (cfg.feedUrl ? [cfg.feedUrl] : []);
     const all: NormalizedEvent[] = [];
@@ -28,6 +29,7 @@ export const rssDriver: Driver = {
       const xml = await ctx.http.getText(url, {
         accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
         cacheTtl: 1800,
+        skipRobots: cfg.ignoreRobots === true,
       });
       all.push(...parseRss(xml, { category: cfg.category, prefecture: cfg.prefecture }));
     }

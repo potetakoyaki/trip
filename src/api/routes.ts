@@ -49,10 +49,17 @@ api.post('/sources', async (c) => {
   }
 
   const prefecture = body.prefecture ? String(body.prefecture) : undefined;
+  const ignoreRobots = body.ignoreRobots === true;
   const config =
     driver === 'rss'
-      ? { driver: 'rss', feedUrl: url, category: body.category ? String(body.category) : undefined, prefecture }
-      : { driver: 'jsonld', pageUrls: [url], prefecture };
+      ? {
+          driver: 'rss',
+          feedUrl: url,
+          category: body.category ? String(body.category) : undefined,
+          prefecture,
+          ignoreRobots,
+        }
+      : { driver: 'jsonld', pageUrls: [url], prefecture, ignoreRobots };
   const id = `${driver}-${crypto.randomUUID().slice(0, 8)}`;
   const kind = driver === 'rss' ? 'rss' : 'html';
 

@@ -86,6 +86,7 @@ async function addSource(ev) {
       prefecture: $('src-pref').value.trim() || undefined,
       name: $('src-name').value.trim() || undefined,
       category: $('src-cat').value.trim() || undefined,
+      ignoreRobots: $('src-ignore-robots').checked,
       enabled: true,
     };
     await api('/sources', {
