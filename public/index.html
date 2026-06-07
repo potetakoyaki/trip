@@ -10,8 +10,8 @@
     <header class="hero">
       <div class="hero-inner">
         <div class="hero-badge">🧳 Trip Planner</div>
-        <h1>行き先と日付だけで、<br />旅程が組み上がる。</h1>
-        <p>エリアと日付を入れて作成するだけ。AIが大手サイト・ブログから情報を集めて、最適な日程プランを自動で作ります。</p>
+        <h1>旅行プランを、自動で。</h1>
+        <p>行き先と日付を入れるだけ。</p>
       </div>
     </header>
 
@@ -124,10 +124,19 @@
             <span class="btn-label">プランを作成する</span>
           </button>
 
+          <button type="button" class="btn-secondary" id="collect-btn">🔬 じっくり収集（バックグラウンド・数分／画面を閉じてもOK）</button>
+
           <p class="hint">
             💡 登録は不要です。エリアを入れて作成すると、アプリが自動で情報を集めてプラン化します（初回は数十秒かかることがあります）。
           </p>
         </form>
+        <div id="collect-progress" class="collect-progress hidden">
+          <div class="cp-head">
+            <span id="cp-label"></span>
+            <span id="cp-count"></span>
+          </div>
+          <div class="cp-track"><div id="cp-fill" class="cp-fill"></div></div>
+        </div>
         <p id="status" class="status"></p>
       </section>
 
@@ -138,6 +147,7 @@
         </div>
         <div id="plan-summary"></div>
         <div id="plan-days" class="timeline"></div>
+        <div id="plan-extra"></div>
       </section>
     </main>
 

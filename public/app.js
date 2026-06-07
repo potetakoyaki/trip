@@ -158,6 +158,76 @@ function validateForm() {
   return true;
 }
 
+let pollTimer = null;
+
+function showProgress(doneRounds, totalRounds, collected, done) {
+  const wrap = $('collect-progress');
+  wrap.classList.remove('hidden');
+  wrap.classList.toggle('done', !!done);
+  const pct = totalRounds ? Math.round((doneRounds / totalRounds) * 100) : done ? 100 : 0;
+  $('cp-fill').style.width = (done ? 100 : pct) + '%';
+  $('cp-label').innerHTML = done
+    ? '✅ 収集完了'
+    : `<span class="cp-spin"></span>じっくり収集中… ${doneRounds}/${totalRounds} ラウンド`;
+  $('cp-count').textContent = `合計 ${collected} 件`;
+}
+
+async function deepCollect() {
+  const area = $('area').value.trim();
+  if (!area) {
+    setStatus('エリア・行き先を入力してください。', 'err');
+    $('area').focus();
+    return;
+  }
+  const btn = $('collect-btn');
+  btn.disabled = true;
+  const keyword = $('keyword').value.trim() || undefined;
+  const interests = [...selectedInterests];
+  try {
+    const r = await api('/collect/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ area, keyword, interests }),
+    });
+    setStatus(
+      `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じてもOK、サーバーが続行します。`,
+      'ok',
+    );
+    showProgress(0, r.totalRounds, 0, false);
+    pollCollect(area);
+  } catch (e) {
+    setStatus('開始に失敗: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 開いている間だけ進捗をポーリング（閉じてもサーバー側は継続する）。
+function pollCollect(area) {
+  if (pollTimer) clearTimeout(pollTimer);
+  let tries = 0;
+  const tick = async () => {
+    tries++;
+    try {
+      const s = await api('/collect/status?area=' + encodeURIComponent(area));
+      if (s.found) {
+        const doneRounds = Math.max(0, s.round - 1);
+        if (s.status === 'done') {
+          showProgress(s.totalRounds, s.totalRounds, s.collected, true);
+          setStatus(`収集完了（${esc(area)}・合計 ${s.collected} 件）。「プランを作成する」で使えます。`, 'ok');
+          return;
+        }
+        showProgress(doneRounds, s.totalRounds, s.collected, false);
+        setStatus('じっくり収集中… 画面を閉じてもサーバーが続行します。', '');
+      }
+    } catch {
+      /* 一時失敗は無視 */
+    }
+    if (tries < 80) pollTimer = setTimeout(tick, 8000);
+  };
+  pollTimer = setTimeout(tick, 6000);
+}
+
 async function submitPlan(ev) {
   ev.preventDefault();
   if (!validateForm()) return;
@@ -235,7 +305,30 @@ function renderPlan(data) {
   daysEl.innerHTML = '';
   plan.days.forEach((day, i) => daysEl.insertAdjacentHTML('beforeend', renderDay(day, i)));
 
+  renderCandidates(data.candidates);
+
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderCandidates(candidates) {
+  const el = $('plan-extra');
+  if (!el) return;
+  if (!candidates || !candidates.length) {
+    el.innerHTML = '';
+    return;
+  }
+  const items = candidates
+    .map((c) => {
+      const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
+      const cat = c.category ? `<span class="badge">${catEmoji(c.category)} ${esc(c.category)}</span>` : '';
+      const price = c.price != null ? `<span class="item-price">${c.price === 0 ? '無料' : '目安 ' + yen(c.price)}</span>` : '';
+      const links =
+        `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍地図</a>` +
+        (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰情報元</a>` : '');
+      return `<div class="cand"><div class="cand-name">${esc(c.title)}</div><div class="cand-meta">${cat}${price} ${links}</div></div>`;
+    })
+    .join('');
+  el.innerHTML = `<details class="cand-box"><summary>🔎 見つかったスポット一覧（${candidates.length}件）</summary><div class="cand-list">${items}</div></details>`;
 }
 
 const yen = (n) => '¥' + Number(n || 0).toLocaleString();
@@ -286,12 +379,16 @@ function renderHotels(hotels) {
       const name = h.url
         ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.name)}</a>`
         : esc(h.name);
+      const link = h.url
+        ? `<a class="hotel-link" href="${esc(h.url)}" target="_blank" rel="noopener">楽天トラベルで見る →</a>`
+        : `<a class="hotel-link" href="https://www.google.com/search?q=${encodeURIComponent(h.name + ' 宿泊 予約')}" target="_blank" rel="noopener">空室・料金を探す →</a>`;
       return `<div class="hotel">
       <div class="hotel-top"><span class="hotel-name">${name}</span>${
         h.nightlyPrice ? `<span class="hotel-price">${yen(h.nightlyPrice)} / 泊・人〜</span>` : ''
       }</div>
       ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
       ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
+      <div class="hotel-actions">${link}</div>
     </div>`;
     })
     .join('');
@@ -377,6 +474,7 @@ function esc(s) {
 window.addEventListener('DOMContentLoaded', async () => {
   initDates();
   $('plan-form').addEventListener('submit', submitPlan);
+  $('collect-btn').addEventListener('click', deepCollect);
   $('share-btn').addEventListener('click', sharePlan);
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { api } from './api/routes';
 import { runScrape } from './scrape/runner';
+import { processCollectQueue } from './scrape/collect-job';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -19,12 +20,17 @@ app.notFound((c) => c.json({ error: 'not found' }, 404));
 export default {
   fetch: (req: Request, env: Env, ctx: ExecutionContext) => app.fetch(req, env, ctx),
 
-  // Cron Trigger: 定期スクレイピング。
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      runScrape(env)
-        .then((s) => console.log('scheduled scrape:', JSON.stringify(s)))
-        .catch((e) => console.error('scheduled scrape failed:', e)),
-    );
+  // Cron Trigger。毎分のトリガーは「じっくり収集キュー」を1ラウンド進め、
+  // 6時間ごとのトリガーは設定ソースの定期スクレイピングを行う。
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (controller.cron === '* * * * *') {
+      ctx.waitUntil(processCollectQueue(env).catch((e) => console.error('collect queue failed:', e)));
+    } else {
+      ctx.waitUntil(
+        runScrape(env)
+          .then((s) => console.log('scheduled scrape:', JSON.stringify(s)))
+          .catch((e) => console.error('scheduled scrape failed:', e)),
+      );
+    }
   },
 };

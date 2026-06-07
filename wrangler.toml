@@ -14,9 +14,9 @@ database_name = "trip"
 database_id = "6a1f49ca-9a8f-4a71-a9e9-4c4837d39cf5"
 migrations_dir = "migrations"
 
-# 定期スクレイピング（6時間ごと）。不要なら削除可。
+# Cron。毎分: じっくり収集キューを1ラウンド進める / 6時間ごと: 設定ソースの定期取得。
 [triggers]
-crons = ["0 */6 * * *"]
+crons = ["0 */6 * * *", "* * * * *"]
 
 # Workers AI（任意）。プラン生成を AI に切り替えたい場合に使う。無料枠あり。
 # 標準はルールベース生成なので、この binding が無くても動作する。

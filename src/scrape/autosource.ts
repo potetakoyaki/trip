@@ -12,7 +12,7 @@ export interface DiscoverResult {
   note?: string;
 }
 
-const MAX_PAGES = 7; // 1エリアあたりに扱う大手サイト/ブログのページ数
+const MAX_PAGES = 12; // 1エリアあたりに扱う大手サイト/ブログのページ数
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -26,15 +26,18 @@ const BROWSER_UA =
  */
 export async function discoverAndScrape(
   env: Env,
-  opts: { area: string; interests?: string[]; keyword?: string },
+  opts: { area: string; interests?: string[]; keyword?: string; queries?: string[]; maxPages?: number },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
   const empty: DiscoverResult = { total: 0, docs: [], stats: { candidates: 0, fetched: 0, engine: null } };
   if (!area) return { ...empty, note: 'エリアが空です' };
   if (!env.AI) return { ...empty, note: 'Workers AI(env.AI) が無効です' };
 
-  const http = new HttpClient({ userAgent: BROWSER_UA });
-  const queries = buildQueries(area, opts.interests, opts.keyword);
+  // 同サービス（Jina/検索）への連続呼び出しを少し速める。対象サイト各ホストは
+  // 1回ずつなのでレート制限の実害はほぼ無い。
+  const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 1200 });
+  const queries = opts.queries?.length ? opts.queries : buildQueries(area, opts.interests, opts.keyword);
+  const maxPages = opts.maxPages ?? MAX_PAGES;
 
   const docs: { source: string; url: string; text: string }[] = [];
   let engine: string | null = null;
@@ -43,12 +46,12 @@ export async function discoverAndScrape(
   // 1) Jina 検索（検索＋本文取得を一度に。キー不要・サーバーIPで動作）
   //    クエリ（観光/グルメ/モデルコース）ごとに上位2件ずつ取り、偏りを防ぐ。
   for (const q of queries) {
-    if (docs.length >= MAX_PAGES) break;
+    if (docs.length >= maxPages) break;
     const results = await jinaSearch(http, env, q);
     if (results.length) {
       engine = 'jina';
       candidates += results.length;
-      pushDocs(docs, results.slice(0, 2));
+      pushDocs(docs, results.slice(0, 2), maxPages);
     }
   }
 
@@ -72,7 +75,7 @@ export async function discoverAndScrape(
     candidates = urls.length;
     const seenHost = new Set<string>();
     for (const url of urls) {
-      if (docs.length >= MAX_PAGES) break;
+      if (docs.length >= maxPages) break;
       const h = hostOf(url);
       if (!h || isExcludedHost(h) || seenHost.has(h)) continue;
       seenHost.add(h);
@@ -91,31 +94,37 @@ export async function discoverAndScrape(
     };
   }
 
-  // 3) AI でスポット抽出して保存
+  // 3) AI でスポット抽出（ページごとに並列実行して時間短縮）→ 保存
   const scrapedAt = new Date().toISOString();
-  let total = 0;
-  for (const doc of docs) {
-    try {
-      const spots = await extractSpots(env, doc.text.slice(0, 6000), { area, interests: opts.interests });
-      const events: NormalizedEvent[] = [];
-      for (const s of spots) {
-        const title = (s.title ?? '').trim();
-        if (!title) continue;
-        events.push({
-          sourceEventId: `${doc.url}#${title}`,
-          title,
-          description: s.description?.trim() || undefined,
-          url: doc.url,
-          category: s.category || inferCategory(title, s.description) || '観光',
-          prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
-          city: s.city || area,
-          raw: { from: doc.source, area },
-        });
+  const perDoc = await Promise.all(
+    docs.map(async (doc) => {
+      try {
+        const spots = await extractSpots(env, doc.text.slice(0, 6000), { area, interests: opts.interests });
+        const events: NormalizedEvent[] = [];
+        for (const s of spots) {
+          const title = (s.title ?? '').trim();
+          if (!title) continue;
+          events.push({
+            sourceEventId: `${doc.url}#${title}`,
+            title,
+            description: s.description?.trim() || undefined,
+            url: doc.url,
+            category: s.category || inferCategory(title, s.description) || '観光',
+            prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
+            city: s.city || area,
+            raw: { from: doc.source, area },
+          });
+        }
+        return { source: doc.source, events };
+      } catch {
+        return { source: doc.source, events: [] as NormalizedEvent[] };
       }
-      total += await upsertEvents(env.DB, doc.source, events, scrapedAt);
-    } catch {
-      /* 1ページの抽出失敗は無視 */
-    }
+    }),
+  );
+
+  let total = 0;
+  for (const { source, events } of perDoc) {
+    if (events.length) total += await upsertEvents(env.DB, source, events, scrapedAt);
   }
 
   return {
@@ -217,9 +226,10 @@ async function searchWeb(
 function pushDocs(
   docs: { source: string; url: string; text: string }[],
   results: { url: string; text: string }[],
+  limit: number,
 ): void {
   for (const r of results) {
-    if (docs.length >= MAX_PAGES) break;
+    if (docs.length >= limit) break;
     const h = hostOf(r.url);
     if (!h || isExcludedHost(h)) continue;
     if (docs.some((d) => hostOf(d.url) === h)) continue; // 同一ホストは1件まで
@@ -278,15 +288,52 @@ export function extractBingLinks(html: string): string[] {
   return out;
 }
 
+// 「じっくり収集」用：多様な切り口の検索テンプレート。ラウンドごとに別の角度で集める。
+const DEEP_TEMPLATES = [
+  '観光 おすすめ スポット',
+  '人気 観光地 名所 ランキング',
+  'グルメ ランチ 名物 おすすめ',
+  'カフェ スイーツ おしゃれ',
+  'イベント 体験 アクティビティ レジャー',
+  '旅行 ブログ モデルコース 巡り',
+  '神社 寺 歴史 名所',
+  '自然 絶景 公園 海 山',
+  '穴場 隠れ家 ローカル おすすめ',
+  '子供 家族 遊び場',
+  'デート カップル おすすめ',
+  '夜景 夕日 ビュースポット',
+  'お土産 ショッピング 市場',
+  '温泉 日帰り 銭湯',
+  '美術館 アート 博物館',
+  'インスタ 映え フォトスポット',
+];
+const DEEP_PER_ROUND = 3;
+
+/** ラウンドごとの検索クエリ群と総ラウンド数を返す（じっくり収集用）。 */
+export function roundQueries(
+  area: string,
+  round: number,
+  keyword?: string,
+): { queries: string[]; totalRounds: number } {
+  const totalRounds = Math.ceil(DEEP_TEMPLATES.length / DEEP_PER_ROUND);
+  const start = (Math.max(1, round) - 1) * DEEP_PER_ROUND;
+  const slice = DEEP_TEMPLATES.slice(start, start + DEEP_PER_ROUND);
+  const queries = slice.map((t) => `${area} ${t}`);
+  if (round === 1 && keyword && keyword.trim()) queries.unshift(`${area} ${keyword.trim()}`);
+  return { queries, totalRounds };
+}
+
 function buildQueries(area: string, interests?: string[], keyword?: string): string[] {
   const queries: string[] = [];
   // キーワード（花火 等）があれば最優先で検索
   if (keyword && keyword.trim()) queries.push(`${area} ${keyword.trim()}`);
   queries.push(
     `${area} 観光 おすすめ スポット`,
-    `${area} グルメ カフェ ランチ 名物 おすすめ`,
-    `${area} イベント 体験 アクティビティ レジャー 遊び`,
-    `${area} 旅行 ブログ モデルコース`,
+    `${area} 人気 観光地 名所 ランキング`,
+    `${area} グルメ ランチ 名物 おすすめ`,
+    `${area} カフェ スイーツ おしゃれ`,
+    `${area} イベント 体験 アクティビティ レジャー`,
+    `${area} 旅行 ブログ モデルコース 巡り`,
   );
   if (interests && interests.length) {
     queries.push(`${area} ${interests.slice(0, 2).join(' ')} おすすめ`);

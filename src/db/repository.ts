@@ -84,6 +84,80 @@ export async function deleteSource(db: D1Database, id: string): Promise<boolean>
   return (res.meta?.changes ?? 0) > 0;
 }
 
+// ---- じっくり収集（バックグラウンド）のジョブ管理 ----
+
+const ENSURE_JOBS_SQL = `CREATE TABLE IF NOT EXISTS collect_jobs (
+  area TEXT PRIMARY KEY,
+  keyword TEXT,
+  interests TEXT,
+  round INTEGER NOT NULL DEFAULT 1,
+  total_rounds INTEGER NOT NULL DEFAULT 6,
+  status TEXT NOT NULL DEFAULT 'pending',
+  collected INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`;
+
+export interface CollectJob {
+  area: string;
+  keyword: string | null;
+  interests: string | null;
+  round: number;
+  total_rounds: number;
+  status: string;
+  collected: number;
+}
+
+/** マイグレーション無しでも動くよう、ジョブ表を都度作成（冪等）。 */
+export async function ensureJobsTable(db: D1Database): Promise<void> {
+  await db.prepare(ENSURE_JOBS_SQL).run();
+}
+
+export async function startJob(
+  db: D1Database,
+  p: { area: string; keyword?: string; interests?: string[]; totalRounds: number; now: string },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO collect_jobs (area, keyword, interests, round, total_rounds, status, collected, created_at, updated_at)
+       VALUES (?,?,?,1,?, 'pending', 0, ?, ?)
+       ON CONFLICT(area) DO UPDATE SET keyword=excluded.keyword, interests=excluded.interests, round=1,
+         total_rounds=excluded.total_rounds, status='pending', updated_at=excluded.updated_at`,
+    )
+    .bind(
+      p.area,
+      p.keyword ?? null,
+      p.interests ? JSON.stringify(p.interests) : null,
+      p.totalRounds,
+      p.now,
+      p.now,
+    )
+    .run();
+}
+
+export async function getJob(db: D1Database, area: string): Promise<CollectJob | null> {
+  const r = await db.prepare('SELECT * FROM collect_jobs WHERE area = ?').bind(area).first<CollectJob>();
+  return r ?? null;
+}
+
+export async function takeNextPendingJob(db: D1Database): Promise<CollectJob | null> {
+  const r = await db
+    .prepare("SELECT * FROM collect_jobs WHERE status = 'pending' ORDER BY updated_at ASC LIMIT 1")
+    .first<CollectJob>();
+  return r ?? null;
+}
+
+export async function updateJobProgress(
+  db: D1Database,
+  area: string,
+  p: { round: number; status: string; collected: number; now: string },
+): Promise<void> {
+  await db
+    .prepare('UPDATE collect_jobs SET round=?, status=?, collected=?, updated_at=? WHERE area=?')
+    .bind(p.round, p.status, p.collected, p.now, area)
+    .run();
+}
+
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */
 export async function upsertEvents(
   db: D1Database,
