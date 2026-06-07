@@ -12,7 +12,7 @@ export interface DiscoverResult {
   note?: string;
 }
 
-const MAX_PAGES = 6; // 1エリアあたりに扱う大手サイト/ブログのページ数
+const MAX_PAGES = 7; // 1エリアあたりに扱う大手サイト/ブログのページ数
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -282,6 +282,7 @@ function buildQueries(area: string, interests?: string[]): string[] {
   const queries = [
     `${area} 観光 おすすめ スポット`,
     `${area} グルメ カフェ ランチ 名物 おすすめ`,
+    `${area} イベント 体験 アクティビティ レジャー 遊び`,
     `${area} 旅行 ブログ モデルコース`,
   ];
   if (interests && interests.length) {

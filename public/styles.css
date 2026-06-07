@@ -110,6 +110,30 @@ main {
   margin: 0 0 16px;
   font-size: 1.25rem;
 }
+.result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.result-head .section-title {
+  margin: 0;
+}
+.btn-ghost {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 700;
+  font-size: 0.84rem;
+  color: var(--brand-ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-ghost:hover {
+  background: #f6f8ff;
+}
 
 /* ---------- Form ---------- */
 .field {

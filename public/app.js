@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const selectedInterests = new Set();
+let currentPlanId = null;
 
 const CAT_EMOJI = {
   グルメ: '🍜',
@@ -43,7 +44,7 @@ function initDates() {
   $('endDate').value = addDays(start, 1);
 }
 
-async function loadCategories() {
+async function loadCategories(preselect) {
   try {
     const { categories } = await api('/categories');
     const box = $('interests');
@@ -51,16 +52,66 @@ async function loadCategories() {
     categories.forEach((cat) => {
       const chip = document.createElement('span');
       chip.className = 'chip';
+      chip.dataset.cat = cat;
       chip.textContent = `${catEmoji(cat)} ${cat}`;
       chip.addEventListener('click', () => {
         chip.classList.toggle('active');
         if (selectedInterests.has(cat)) selectedInterests.delete(cat);
         else selectedInterests.add(cat);
       });
+      if (preselect && preselect.includes(cat)) {
+        chip.classList.add('active');
+        selectedInterests.add(cat);
+      }
       box.appendChild(chip);
     });
   } catch (e) {
     console.error(e);
+  }
+}
+
+function fillForm(req) {
+  if (!req) return;
+  const set = (id, v) => {
+    if (v != null && v !== '') $(id).value = v;
+  };
+  set('area', req.area);
+  set('origin', req.origin);
+  set('transport', req.transport);
+  set('startDate', req.startDate);
+  set('endDate', req.endDate);
+  set('budget', req.budget);
+  set('pace', req.pace);
+  set('weather', req.weather);
+  set('companions', req.companions);
+  set('vibe', req.vibe);
+}
+
+async function sharePlan() {
+  if (!currentPlanId) return;
+  const url = `${location.origin}/?plan=${currentPlanId}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    setStatus('プランのリンクをコピーしました 🔗 ' + url, 'ok');
+  } catch {
+    setStatus('共有リンク: ' + url, 'ok');
+  }
+}
+
+async function loadSharedPlan(id) {
+  setStatus('保存されたプランを読み込み中…');
+  try {
+    const d = await api('/plan/' + encodeURIComponent(id));
+    selectedInterests.clear();
+    await loadCategories(d.request && d.request.interests);
+    fillForm(d.request);
+    currentPlanId = d.id;
+    renderPlan({ plan: d.result });
+    $('share-btn').classList.remove('hidden');
+    setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
+  } catch (e) {
+    await loadCategories();
+    setStatus('共有プランが見つかりませんでした: ' + e.message, 'err');
   }
 }
 
@@ -93,6 +144,8 @@ async function submitPlan(ev) {
       body: JSON.stringify(body),
     });
     renderPlan(data);
+    currentPlanId = data.id;
+    if (currentPlanId) $('share-btn').classList.remove('hidden');
     if (data.candidateCount === 0) {
       setStatus(`条件に合う候補が見つかりませんでした。${discoverDiag(data.discovered)}`, 'err');
     } else {
@@ -276,12 +329,16 @@ function esc(s) {
 }
 
 // --- bootstrap ---
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   initDates();
-  loadCategories();
   $('plan-form').addEventListener('submit', submitPlan);
+  $('share-btn').addEventListener('click', sharePlan);
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;
     if (s) $('endDate').value = addDays(s, 1);
   });
+
+  const sharedId = new URLSearchParams(location.search).get('plan');
+  if (sharedId) await loadSharedPlan(sharedId);
+  else await loadCategories();
 });
