@@ -3,6 +3,21 @@
 const $ = (id) => document.getElementById(id);
 const selectedInterests = new Set();
 
+const CAT_EMOJI = {
+  グルメ: '🍜',
+  自然: '🌿',
+  歴史: '⛩️',
+  アート: '🎨',
+  音楽: '🎵',
+  体験: '🎫',
+  宿泊: '♨️',
+  祭り: '🎆',
+  テック: '💻',
+  観光: '📷',
+  イベント: '🎉',
+};
+const catEmoji = (c) => CAT_EMOJI[c] || '📍';
+
 function setStatus(msg, kind = '') {
   const el = $('status');
   el.textContent = msg;
@@ -16,13 +31,16 @@ async function api(path, options) {
   return data;
 }
 
-// --- 初期化 ---
+// --- dates ---
+function addDays(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 function initDates() {
-  const today = new Date();
-  const inAWeek = new Date(today.getTime() + 7 * 86400000);
-  const end = new Date(inAWeek.getTime() + 86400000);
-  $('startDate').value = inAWeek.toISOString().slice(0, 10);
-  $('endDate').value = end.toISOString().slice(0, 10);
+  const start = addDays(new Date().toISOString().slice(0, 10), 7);
+  $('startDate').value = start;
+  $('endDate').value = addDays(start, 1);
 }
 
 async function loadCategories() {
@@ -33,7 +51,7 @@ async function loadCategories() {
     categories.forEach((cat) => {
       const chip = document.createElement('span');
       chip.className = 'chip';
-      chip.textContent = cat;
+      chip.textContent = `${catEmoji(cat)} ${cat}`;
       chip.addEventListener('click', () => {
         chip.classList.toggle('active');
         if (selectedInterests.has(cat)) selectedInterests.delete(cat);
@@ -46,99 +64,14 @@ async function loadCategories() {
   }
 }
 
-async function loadSources() {
-  try {
-    const { sources } = await api('/sources');
-    const tbody = $('sources-table').querySelector('tbody');
-    tbody.innerHTML = '';
-    if (!sources.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="hint">ソースがありません。「＋ スクレイピング元を追加」から登録してください。</td></tr>';
-      return;
-    }
-    sources.forEach((s) => {
-      const driver = (s.config && s.config.driver) || s.kind || '—';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${esc(s.name)}</td>
-        <td>${esc(driver)}</td>
-        <td>${s.enabled ? '<span class="badge-on">有効</span>' : '<span class="badge-off">無効</span>'}</td>
-        <td>${esc(s.last_status || '—')}</td>
-        <td class="src-actions">
-          <button class="ghost small" data-action="toggle" data-id="${esc(s.id)}" data-enabled="${s.enabled ? 1 : 0}">${s.enabled ? '無効化' : '有効化'}</button>
-          <button class="ghost small danger" data-action="delete" data-id="${esc(s.id)}" data-name="${esc(s.name)}">削除</button>
-        </td>`;
-      tbody.appendChild(tr);
-    });
-  } catch (e) {
-    console.error(e);
-  }
-}
-
-async function addSource(ev) {
-  ev.preventDefault();
-  const btn = ev.submitter;
-  if (btn) btn.disabled = true;
-  setStatus('スクレイピング元を追加中...');
-  try {
-    const body = {
-      driver: $('src-driver').value,
-      url: $('src-url').value.trim(),
-      prefecture: $('src-pref').value.trim() || undefined,
-      name: $('src-name').value.trim() || undefined,
-      category: $('src-cat').value.trim() || undefined,
-      ignoreRobots: $('src-ignore-robots').checked,
-      enabled: true,
-    };
-    await api('/sources', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    $('source-form').reset();
-    await loadSources();
-    setStatus('追加しました。「スクレイピング実行」で取得できます。', 'ok');
-  } catch (e) {
-    setStatus('追加に失敗: ' + e.message, 'err');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-async function onSourceAction(ev) {
-  const btn = ev.target.closest('button[data-action]');
-  if (!btn) return;
-  const id = btn.dataset.id;
-  const action = btn.dataset.action;
-  btn.disabled = true;
-  try {
-    if (action === 'toggle') {
-      const enabled = btn.dataset.enabled === '1';
-      await api('/sources/' + encodeURIComponent(id), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !enabled }),
-      });
-    } else if (action === 'delete') {
-      if (!confirm(`「${btn.dataset.name}」を削除しますか？`)) {
-        btn.disabled = false;
-        return;
-      }
-      await api('/sources/' + encodeURIComponent(id), { method: 'DELETE' });
-    }
-    await loadSources();
-  } catch (e) {
-    setStatus('操作に失敗: ' + e.message, 'err');
-    btn.disabled = false;
-  }
-}
-
-// --- プラン生成 ---
+// --- plan ---
 async function submitPlan(ev) {
   ev.preventDefault();
-  const btn = ev.submitter;
-  if (btn) btn.disabled = true;
+  const btn = $('submit-btn');
+  btn.disabled = true;
+  btn.classList.add('loading');
   const autoScrape = $('autoScrape').checked;
-  setStatus(autoScrape ? '大手サイト・ブログから情報収集してプランを作成中...（初回は数十秒かかります）' : 'プランを作成中...');
+  setStatus(autoScrape ? '情報を集めてプランを作成中…（初回は数十秒かかります）' : 'プランを作成中…');
   try {
     const body = {
       area: $('area').value.trim() || undefined,
@@ -157,19 +90,19 @@ async function submitPlan(ev) {
     });
     renderPlan(data);
     if (data.candidateCount === 0) {
-      setStatus(`候補が0件でした。${discoverDiag(data.discovered)}`, 'err');
+      setStatus(`条件に合う候補が見つかりませんでした。${discoverDiag(data.discovered)}`, 'err');
     } else {
       const extra = [];
       if (data.discovered && data.discovered.total) extra.push(`自動収集 ${data.discovered.total}件`);
       if (data.scrape && data.scrape.ran && data.scrape.total) extra.push(`登録ソース ${data.scrape.total}件`);
-      const suffix = extra.length ? ` / ${extra.join(' / ')}` : '';
-      setStatus(`完成（候補 ${data.candidateCount}件${suffix}）`, 'ok');
+      const suffix = extra.length ? ` ・ ${extra.join(' / ')}` : '';
+      setStatus(`プランが完成しました（候補 ${data.candidateCount}件${suffix}）`, 'ok');
     }
-    if (autoScrape) loadSources();
   } catch (e) {
     setStatus('エラー: ' + e.message, 'err');
   } finally {
-    if (btn) btn.disabled = false;
+    btn.disabled = false;
+    btn.classList.remove('loading');
   }
 }
 
@@ -177,61 +110,54 @@ function renderPlan(data) {
   const plan = data.plan;
   $('result').classList.remove('hidden');
 
-  const cost = plan.totalEstimatedCost
-    ? `<span class="cost">概算費用: ¥${plan.totalEstimatedCost.toLocaleString()}</span>`
-    : '';
+  const metaParts = [];
+  if (plan.totalEstimatedCost) metaParts.push(`<span class="cost">概算 ¥${plan.totalEstimatedCost.toLocaleString()} / 人</span>`);
+  const meta = metaParts.length ? `<div class="summary-meta">${metaParts.join(' ')}</div>` : '';
   const highlights = (plan.highlights || []).length
     ? `<div class="highlights">${plan.highlights.map((h) => `<span class="tag">★ ${esc(h)}</span>`).join('')}</div>`
     : '';
-  $('plan-summary').innerHTML = `<div class="summary-box"><div>${esc(plan.summary)}</div>${cost}${highlights}</div>`;
+  $('plan-summary').innerHTML =
+    `<div class="summary-box"><div class="summary-text">${esc(plan.summary)}</div>${meta}${highlights}</div>`;
 
   const daysEl = $('plan-days');
   daysEl.innerHTML = '';
-  plan.days.forEach((day, i) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'day';
-    const dateLabel = formatDate(day.date, i);
-    const items = day.items.length
-      ? day.items.map(renderItem).join('')
-      : '<p class="hint">この日の候補が見つかりませんでした。条件をゆるめるか、データを追加してください。</p>';
-    wrap.innerHTML = `<div class="day-head">${dateLabel}</div>${items}`;
-    daysEl.appendChild(wrap);
-  });
+  plan.days.forEach((day, i) => daysEl.insertAdjacentHTML('beforeend', renderDay(day, i)));
 
-  $('result').scrollIntoView({ behavior: 'smooth' });
+  $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function renderItem(it) {
-  const time = it.time ? `<div class="time">${esc(it.time)}</div>` : '<div class="time">—</div>';
-  const cat = it.category ? `<span class="cat">${esc(it.category)}</span>` : '';
-  const loc = it.location ? `📍 ${esc(it.location)}` : '';
-  const price = it.price != null ? ` / ¥${Number(it.price).toLocaleString()}` : '';
-  const title = it.url
-    ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>`
-    : esc(it.title);
+function renderDay(day, i) {
+  const d = new Date(day.date + 'T00:00:00');
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  const items = day.items.length
+    ? day.items.map(renderItem).join('')
+    : '<div class="empty-day">この日の候補は見つかりませんでした。条件をゆるめてみてください。</div>';
   return `
-    <div class="item">
-      ${time}
-      <div class="body">
-        <div class="title">${title}</div>
-        <div class="meta">${cat}${loc}${price}</div>
+    <div class="day">
+      <div class="day-head">
+        <div class="day-num"><small>DAY</small>${i + 1}</div>
+        <div class="day-date">${d.getMonth() + 1}/${d.getDate()}<span>(${wd})</span></div>
       </div>
+      <div class="items">${items}</div>
     </div>`;
 }
 
-// --- 補助操作 ---
-async function runDemo(ev) {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
-  setStatus('サンプルデータを投入中...');
-  try {
-    const data = await api('/demo', { method: 'POST' });
-    setStatus(`サンプル ${data.inserted} 件を投入しました。エリアに「箱根」と入れて作成してみてください。`, 'ok');
-  } catch (e) {
-    setStatus('エラー: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
+function renderItem(it) {
+  const time = it.time
+    ? `<span class="item-time">${esc(it.time)}</span>`
+    : `<span class="item-time tba">時間自由</span>`;
+  const title = it.url
+    ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>`
+    : esc(it.title);
+  const meta = [];
+  if (it.category) meta.push(`<span class="badge">${catEmoji(it.category)} ${esc(it.category)}</span>`);
+  if (it.location) meta.push(`<span>📍 ${esc(it.location)}</span>`);
+  if (it.price != null) meta.push(`<span class="item-price">¥${Number(it.price).toLocaleString()}</span>`);
+  return `
+    <div class="item">
+      <div class="item-top">${time}<span class="item-title">${title}</span></div>
+      ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
+    </div>`;
 }
 
 function discoverDiag(discovered) {
@@ -240,48 +166,6 @@ function discoverDiag(discovered) {
   const stat = s ? `[検索候補 ${s.candidates} / 取得 ${s.fetched} / エンジン ${s.engine || 'なし'}]` : '';
   const note = discovered.note ? ' ' + discovered.note : '';
   return `${stat}${note}`;
-}
-
-async function runScrape(ev) {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
-  const area = $('area').value.trim();
-  setStatus(area ? `「${area}」の情報を収集中...（初回は数十秒かかります）` : 'スクレイピングを実行中...（登録ソース）');
-  try {
-    const path = '/scrape' + (area ? '?area=' + encodeURIComponent(area) : '');
-    const summary = await api(path, { method: 'POST' });
-    const results = summary.results || [];
-    const ok = results.filter((r) => r.status === 'ok').length;
-    const failed = results.filter((r) => r.status === 'error');
-    const discovered = (summary.discovered && summary.discovered.total) || 0;
-    await loadSources();
-
-    const parts = [];
-    if (discovered) parts.push(`自動収集 ${discovered}件`);
-    if (ok) parts.push(`登録ソース ${summary.total}件`);
-
-    if (discovered || ok) {
-      let msg = '完了: ' + parts.join(' / ');
-      if (failed.length) msg += ` / 一部失敗: ${failed.map((r) => r.source + ': ' + r.message).join(' / ')}`;
-      setStatus(msg, 'ok');
-    } else if (failed.length) {
-      setStatus('失敗: ' + failed.map((r) => `${r.source}: ${r.message}`).join(' / '), 'err');
-    } else if (area) {
-      setStatus(`「${area}」の情報が見つかりませんでした。${discoverDiag(summary.discovered)}`, 'err');
-    } else {
-      setStatus('エリアを入力して実行すると、自動で大手サイト・ブログから収集します。', 'err');
-    }
-  } catch (e) {
-    setStatus('エラー: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-function formatDate(iso, i) {
-  const d = new Date(iso + 'T00:00:00');
-  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
-  return `Day ${i + 1} ・ ${d.getMonth() + 1}/${d.getDate()}(${wd})`;
 }
 
 function esc(s) {
@@ -294,11 +178,9 @@ function esc(s) {
 window.addEventListener('DOMContentLoaded', () => {
   initDates();
   loadCategories();
-  loadSources();
   $('plan-form').addEventListener('submit', submitPlan);
-  $('demo-btn').addEventListener('click', runDemo);
-  $('scrape-btn').addEventListener('click', runScrape);
-  $('refresh-sources').addEventListener('click', loadSources);
-  $('source-form').addEventListener('submit', addSource);
-  $('sources-table').querySelector('tbody').addEventListener('click', onSourceAction);
+  $('startDate').addEventListener('change', () => {
+    const s = $('startDate').value;
+    if (s) $('endDate').value = addDays(s, 1);
+  });
 });
