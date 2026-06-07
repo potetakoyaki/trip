@@ -12,7 +12,7 @@ export interface DiscoverResult {
   note?: string;
 }
 
-const MAX_PAGES = 9; // 1エリアあたりに扱う大手サイト/ブログのページ数
+const MAX_PAGES = 12; // 1エリアあたりに扱う大手サイト/ブログのページ数
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -33,7 +33,9 @@ export async function discoverAndScrape(
   if (!area) return { ...empty, note: 'エリアが空です' };
   if (!env.AI) return { ...empty, note: 'Workers AI(env.AI) が無効です' };
 
-  const http = new HttpClient({ userAgent: BROWSER_UA });
+  // 同サービス（Jina/検索）への連続呼び出しを少し速める。対象サイト各ホストは
+  // 1回ずつなのでレート制限の実害はほぼ無い。
+  const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 1200 });
   const queries = buildQueries(area, opts.interests, opts.keyword);
 
   const docs: { source: string; url: string; text: string }[] = [];
@@ -91,31 +93,37 @@ export async function discoverAndScrape(
     };
   }
 
-  // 3) AI でスポット抽出して保存
+  // 3) AI でスポット抽出（ページごとに並列実行して時間短縮）→ 保存
   const scrapedAt = new Date().toISOString();
-  let total = 0;
-  for (const doc of docs) {
-    try {
-      const spots = await extractSpots(env, doc.text.slice(0, 6000), { area, interests: opts.interests });
-      const events: NormalizedEvent[] = [];
-      for (const s of spots) {
-        const title = (s.title ?? '').trim();
-        if (!title) continue;
-        events.push({
-          sourceEventId: `${doc.url}#${title}`,
-          title,
-          description: s.description?.trim() || undefined,
-          url: doc.url,
-          category: s.category || inferCategory(title, s.description) || '観光',
-          prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
-          city: s.city || area,
-          raw: { from: doc.source, area },
-        });
+  const perDoc = await Promise.all(
+    docs.map(async (doc) => {
+      try {
+        const spots = await extractSpots(env, doc.text.slice(0, 6000), { area, interests: opts.interests });
+        const events: NormalizedEvent[] = [];
+        for (const s of spots) {
+          const title = (s.title ?? '').trim();
+          if (!title) continue;
+          events.push({
+            sourceEventId: `${doc.url}#${title}`,
+            title,
+            description: s.description?.trim() || undefined,
+            url: doc.url,
+            category: s.category || inferCategory(title, s.description) || '観光',
+            prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
+            city: s.city || area,
+            raw: { from: doc.source, area },
+          });
+        }
+        return { source: doc.source, events };
+      } catch {
+        return { source: doc.source, events: [] as NormalizedEvent[] };
       }
-      total += await upsertEvents(env.DB, doc.source, events, scrapedAt);
-    } catch {
-      /* 1ページの抽出失敗は無視 */
-    }
+    }),
+  );
+
+  let total = 0;
+  for (const { source, events } of perDoc) {
+    if (events.length) total += await upsertEvents(env.DB, source, events, scrapedAt);
   }
 
   return {
@@ -284,9 +292,11 @@ function buildQueries(area: string, interests?: string[], keyword?: string): str
   if (keyword && keyword.trim()) queries.push(`${area} ${keyword.trim()}`);
   queries.push(
     `${area} 観光 おすすめ スポット`,
-    `${area} グルメ カフェ ランチ 名物 おすすめ`,
-    `${area} イベント 体験 アクティビティ レジャー 遊び`,
-    `${area} 旅行 ブログ モデルコース`,
+    `${area} 人気 観光地 名所 ランキング`,
+    `${area} グルメ ランチ 名物 おすすめ`,
+    `${area} カフェ スイーツ おしゃれ`,
+    `${area} イベント 体験 アクティビティ レジャー`,
+    `${area} 旅行 ブログ モデルコース 巡り`,
   );
   if (interests && interests.length) {
     queries.push(`${area} ${interests.slice(0, 2).join(' ')} おすすめ`);
