@@ -13,6 +13,7 @@ import {
   updateSource,
 } from '../db/repository';
 import { generatePlan } from '../planner/planner';
+import { extractSpotsDiag } from '../scrape/ai-extract';
 import { ALL_CATEGORIES } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
@@ -23,17 +24,21 @@ api.get('/health', (c) =>
 
 api.get('/categories', (c) => c.json({ categories: ALL_CATEGORIES }));
 
-// 診断用: Workers AI が実際に動くか確認する。
+// 診断用: Workers AI が動くか、抽出が成立するかを確認する。
 api.get('/ai-test', async (c) => {
   if (!c.env.AI) return c.json({ ok: false, error: 'AI binding がありません' });
+  const out: Record<string, unknown> = { ok: true };
   try {
     const res = (await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
       messages: [{ role: 'user', content: '「箱根」で有名な観光スポットを1つだけ、名称のみ答えて。' }],
     })) as { response?: string };
-    return c.json({ ok: true, response: res?.response ?? null });
+    out.generate = res?.response ?? null;
   } catch (e) {
-    return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    out.generateError = e instanceof Error ? e.message : String(e);
   }
+  // 抽出パイプラインを固定サンプルでテスト
+  out.extract = await extractSpotsDiag(c.env);
+  return c.json(out);
 });
 
 api.get('/sources', async (c) => {

@@ -3,7 +3,7 @@ import { parseRss } from '../src/scrape/rss';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 import { robotsAllows } from '../src/scrape/robots';
 import { extractReadableText } from '../src/scrape/readable';
-import { parseSpotArray } from '../src/scrape/ai-extract';
+import { parseSpotArray, readSpots } from '../src/scrape/ai-extract';
 import { extractDdgLinks, extractBingLinks } from '../src/scrape/autosource';
 
 describe('parseRss', () => {
@@ -157,6 +157,28 @@ describe('parseSpotArray（AI応答からJSON配列を抽出）', () => {
 
   it('壊れたJSONは空配列', () => {
     expect(parseSpotArray('[{"title": broken')).toEqual([]);
+  });
+});
+
+describe('readSpots（AI応答の各形式に対応）', () => {
+  it('JSONモードのオブジェクト応答 {spots:[...]} を読む', () => {
+    const res = { response: { spots: [{ title: '大涌谷', category: '自然' }, { title: '芦ノ湖' }] } };
+    expect(readSpots(res)).toHaveLength(2);
+  });
+
+  it('response が配列のオブジェクト文字列でも読む', () => {
+    const res = { response: '{"spots":[{"title":"箱根神社"}]}' };
+    expect(readSpots(res)).toHaveLength(1);
+  });
+
+  it('response が素の配列文字列でも読む', () => {
+    const res = { response: '[{"title":"彫刻の森美術館","category":"アート"}]' };
+    expect(readSpots(res)[0].title).toBe('彫刻の森美術館');
+  });
+
+  it('title が無い要素は除外', () => {
+    const res = { response: { spots: [{ category: '自然' }, { title: '大涌谷' }] } };
+    expect(readSpots(res)).toHaveLength(1);
   });
 });
 

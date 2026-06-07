@@ -1,6 +1,8 @@
 import type { Env } from '../types';
 
-const MODEL = '@cf/meta/llama-3.1-8b-instruct';
+// 抽出は指示追従が強いモデルを使う。失敗時は軽量モデルにフォールバック。
+const EXTRACT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
 export interface Spot {
   title?: string;
@@ -10,9 +12,50 @@ export interface Spot {
   description?: string;
 }
 
+const JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    spots: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          category: { type: 'string' },
+          prefecture: { type: 'string' },
+          city: { type: 'string' },
+          description: { type: 'string' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  required: ['spots'],
+};
+
+function buildMessages(text: string, hint: { area?: string; interests?: string[] }) {
+  const sys =
+    'あなたは旅行情報の抽出器です。与えられた文章から、旅行で実際に訪れる価値のあるスポット・店・名所・施設・イベントを抽出します。文章に書かれていない情報は創作しません。地名そのもの（県名・市名）や抽象概念は除外し、具体的な訪問先だけを挙げます。';
+  const hintLines: string[] = [];
+  if (hint.area) hintLines.push(`対象エリア: ${hint.area}`);
+  if (hint.interests?.length) hintLines.push(`特に次の興味に関連するものを優先: ${hint.interests.join('、')}`);
+  const user = [
+    '次の文章から訪問先を最大10件抽出し、JSONで返してください。',
+    ...hintLines,
+    '各要素のフィールド: title(名称・必須), category(グルメ/自然/歴史/アート/音楽/体験/宿泊/祭り/観光 のいずれか), prefecture, city, description(20〜60字)。',
+    '',
+    '文章:',
+    text,
+  ].join('\n');
+  return [
+    { role: 'system', content: sys },
+    { role: 'user', content: user },
+  ];
+}
+
 /**
- * 文章（ブログ本文・百科事典記事など）から旅行スポットを抽出する。
- * Workers AI を使う。env.AI が無ければ空配列。
+ * 文章から旅行スポットを抽出する。
+ * まず JSON モード（schema強制）で賢いモデルに依頼し、ダメなら軽量モデルで素のJSONを試す。
  */
 export async function extractSpots(
   env: Env,
@@ -20,43 +63,85 @@ export async function extractSpots(
   hint: { area?: string; interests?: string[] } = {},
 ): Promise<Spot[]> {
   if (!env.AI || !text.trim()) return [];
+  const messages = buildMessages(text, hint);
 
-  const sys =
-    'あなたは旅行情報の抽出器です。与えられた文章から、旅行で実際に訪れる価値のあるスポット・店・名所・施設・イベントを抽出し、JSON配列のみで返します。文章に書かれていない情報は創作しません。地名そのもの（県名・市名）や抽象的な概念は除外し、具体的な訪問先だけを挙げます。';
+  // 1) JSONモード（schema強制）
+  try {
+    const res = await env.AI.run(EXTRACT_MODEL, {
+      messages,
+      response_format: { type: 'json_schema', json_schema: JSON_SCHEMA },
+    });
+    const spots = readSpots(res);
+    if (spots.length) return spots;
+  } catch {
+    /* フォールバックへ */
+  }
 
-  const hintLines: string[] = [];
-  if (hint.area) hintLines.push(`対象エリア: ${hint.area}`);
-  if (hint.interests?.length) hintLines.push(`特に次の興味に関連するものを優先: ${hint.interests.join('、')}`);
-
-  const user = [
-    '次の文章から、最大10件の訪問先を抽出してください。',
-    ...hintLines,
-    '各要素: {"title": 名称, "category": グルメ|自然|歴史|アート|音楽|体験|宿泊|祭り|観光 のいずれか, "prefecture": 都道府県(分かれば), "city": 市区町村(分かれば), "description": 20〜60字の説明}',
-    'JSON配列だけを出力してください（前後の説明やコードブロックは不要）。',
-    '',
-    '文章:',
-    text,
-  ].join('\n');
-
-  const res = (await env.AI.run(MODEL, {
-    messages: [
-      { role: 'system', content: sys },
-      { role: 'user', content: user },
-    ],
-  })) as { response?: string };
-
-  return parseSpotArray(res?.response ?? '');
+  // 2) 軽量モデルで素のJSON出力 → テキストから配列抽出
+  try {
+    const res = await env.AI.run(FALLBACK_MODEL, { messages });
+    return readSpots(res);
+  } catch {
+    return [];
+  }
 }
 
-/** AI 応答テキストから JSON 配列部分を取り出してパースする。 */
+/** AI 応答（オブジェクト / 文字列いずれの形でも）から Spot 配列を取り出す。 */
+export function readSpots(res: any): Spot[] {
+  const r = res?.response ?? res;
+  if (r && typeof r === 'object') {
+    if (Array.isArray(r)) return cleanSpots(r);
+    if (Array.isArray(r.spots)) return cleanSpots(r.spots);
+    return [];
+  }
+  if (typeof r === 'string') {
+    const trimmed = r.trim();
+    try {
+      const o = JSON.parse(trimmed);
+      if (Array.isArray(o)) return cleanSpots(o);
+      if (o && Array.isArray(o.spots)) return cleanSpots(o.spots);
+    } catch {
+      /* テキスト中の配列を拾う */
+    }
+    return parseSpotArray(r);
+  }
+  return [];
+}
+
+function cleanSpots(arr: any[]): Spot[] {
+  return arr.filter((x) => x && typeof x === 'object' && typeof x.title === 'string' && x.title.trim());
+}
+
+/** テキストから JSON 配列部分を取り出してパースする。 */
 export function parseSpotArray(s: string): Spot[] {
   const start = s.indexOf('[');
   const end = s.lastIndexOf(']');
   if (start === -1 || end <= start) return [];
   try {
     const arr = JSON.parse(s.slice(start, end + 1));
-    return Array.isArray(arr) ? arr.filter((x) => x && typeof x === 'object') : [];
+    return Array.isArray(arr) ? cleanSpots(arr) : [];
   } catch {
     return [];
+  }
+}
+
+/** 診断用: 固定サンプルで抽出を試し、生応答と結果を返す。 */
+export async function extractSpotsDiag(
+  env: Env,
+): Promise<{ model: string; raw: string; count: number; spots: Spot[]; error?: string }> {
+  const sample =
+    '箱根は神奈川県の人気観光地。大涌谷では黒たまごが名物。芦ノ湖では海賊船クルーズが楽しめる。彫刻の森美術館や箱根神社の水中鳥居も有名。強羅温泉では日帰り入浴ができる。';
+  const messages = buildMessages(sample, { area: '箱根' });
+  if (!env.AI) return { model: EXTRACT_MODEL, raw: '', count: 0, spots: [], error: 'AI binding なし' };
+  try {
+    const res = (await env.AI.run(EXTRACT_MODEL, {
+      messages,
+      response_format: { type: 'json_schema', json_schema: JSON_SCHEMA },
+    })) as any;
+    const raw = typeof res?.response === 'string' ? res.response : JSON.stringify(res?.response ?? res);
+    const spots = readSpots(res);
+    return { model: EXTRACT_MODEL, raw: raw.slice(0, 500), count: spots.length, spots };
+  } catch (e) {
+    return { model: EXTRACT_MODEL, raw: '', count: 0, spots: [], error: e instanceof Error ? e.message : String(e) };
   }
 }
