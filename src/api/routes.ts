@@ -252,6 +252,27 @@ api.post('/collect/start', async (c) => {
   const keyword = str(raw?.keyword, 80);
   const interests = strArr(raw?.interests);
   await ensureJobsTable(c.env.DB);
+
+  // 無駄なAI消費を防ぐ: 既に収集中 / 収集済みのエリアは再収集させない。
+  const existing = await getJob(c.env.DB, area);
+  const existingCount = (await searchEvents(c.env.DB, { area, limit: 60 })).length;
+  if (existing && existing.status === 'pending') {
+    return c.json({
+      ok: false,
+      reason: 'running',
+      total: existingCount,
+      message: `「${area}」は既に収集中です。完了までお待ちください。`,
+    });
+  }
+  if ((existing && existing.status === 'done') || existingCount >= 15) {
+    return c.json({
+      ok: false,
+      reason: 'collected',
+      total: existingCount,
+      message: `「${area}」は収集済みです（合計 ${existingCount} 件）。再収集は不要で、そのままプランを作成できます。`,
+    });
+  }
+
   const { totalRounds } = roundQueries(area, 1, keyword);
   await startJob(c.env.DB, { area, keyword, interests, totalRounds, now: new Date().toISOString() });
   // 最初の1ラウンドはこのリクエストのバックグラウンドで即実行（待たずに返す）。
