@@ -113,12 +113,18 @@
           </div>
 
           <div class="field">
-            <label>ホテルの希望（任意）</label>
+            <label>ホテルの希望（任意・一般的な条件）</label>
             <div class="checks">
-              <label class="check"><input type="checkbox" class="hotel-feat" value="温泉" /> 温泉</label>
-              <label class="check"><input type="checkbox" class="hotel-feat" value="露天風呂" /> 露天風呂</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="朝食付き" /> 朝食付き</label>
               <label class="check"><input type="checkbox" class="hotel-feat" value="夕食付き" /> 夕食付き</label>
-              <label class="check"><input type="checkbox" class="hotel-feat" value="リゾート" /> リゾート</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="温泉" /> 温泉</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="大浴場" /> 大浴場</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="露天風呂" /> 露天風呂</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="駐車場" /> 駐車場</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="禁煙" /> 禁煙</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="駅近" /> 駅近</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="Wi-Fi" /> Wi-Fi無料</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="送迎" /> 送迎あり</label>
             </div>
           </div>
 
@@ -179,7 +185,10 @@
       <section id="result" class="card result-card hidden">
         <div class="result-head">
           <h2 class="section-title">あなたの旅行プラン</h2>
-          <button type="button" id="share-btn" class="btn-ghost hidden">🔗 リンクをコピー</button>
+          <div class="result-actions">
+            <button type="button" id="save-btn" class="btn-ghost hidden">💾 このプランを保存</button>
+            <button type="button" id="share-btn" class="btn-ghost hidden">🔗 リンクをコピー</button>
+          </div>
         </div>
         <div id="plan-summary"></div>
         <div id="plan-eval"></div>

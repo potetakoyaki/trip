@@ -517,7 +517,7 @@ export async function listPlans(
   await ensurePlansColumns(db);
   const { results } = await db
     .prepare(
-      'SELECT id, created_at, request, result FROM plans WHERE COALESCE(hidden, 0) = 0 ORDER BY created_at DESC LIMIT ?',
+      'SELECT id, created_at, request, result FROM plans WHERE COALESCE(saved, 0) = 1 AND COALESCE(hidden, 0) = 0 ORDER BY created_at DESC LIMIT ?',
     )
     .bind(Math.min(limit, 50))
     .all();
@@ -548,7 +548,7 @@ export async function listPlans(
 export async function getPlan(
   db: D1Database,
   id: string,
-): Promise<{ id: string; created_at: string; request: PlanRequest; result: Plan } | null> {
+): Promise<{ id: string; created_at: string; request: PlanRequest; result: Plan; saved: boolean } | null> {
   const row = await db.prepare('SELECT * FROM plans WHERE id = ?').bind(id).first<any>();
   if (!row) return null;
   return {
@@ -556,13 +556,19 @@ export async function getPlan(
     created_at: row.created_at,
     request: JSON.parse(row.request),
     result: JSON.parse(row.result),
+    saved: !!row.saved,
   };
 }
 
-/** plans に hidden 列が無ければ追加する（ソフト削除用・冪等）。 */
+/** plans に hidden / saved 列が無ければ追加する（冪等）。 */
 export async function ensurePlansColumns(db: D1Database): Promise<void> {
   try {
     await db.prepare('ALTER TABLE plans ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    /* 既に存在する */
+  }
+  try {
+    await db.prepare('ALTER TABLE plans ADD COLUMN saved INTEGER NOT NULL DEFAULT 0').run();
   } catch {
     /* 既に存在する */
   }
@@ -573,6 +579,21 @@ export async function hidePlan(db: D1Database, id: string): Promise<boolean> {
   await ensurePlansColumns(db);
   const res = await db.prepare('UPDATE plans SET hidden = 1 WHERE id = ?').bind(id).run();
   return (res.meta?.changes ?? 0) > 0;
+}
+
+/** プランを「保存」する（保存ボタンを押したものだけ履歴に出す）。 */
+export async function markPlanSaved(db: D1Database, id: string): Promise<boolean> {
+  await ensurePlansColumns(db);
+  const res = await db.prepare('UPDATE plans SET saved = 1, hidden = 0 WHERE id = ?').bind(id).run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
+/** 編集後のプラン内容（result）を上書き保存する。 */
+export async function updatePlanResult(db: D1Database, id: string, result: Plan): Promise<void> {
+  await db
+    .prepare('UPDATE plans SET result = ? WHERE id = ?')
+    .bind(JSON.stringify(result).slice(0, 200_000), id)
+    .run();
 }
 
 /** 動作確認用のサンプルイベントを投入する。 */
