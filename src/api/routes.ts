@@ -210,7 +210,11 @@ api.post('/plan', async (c) => {
   let discovered: { total: number; docs: { source: string; url: string }[] } | null = null;
   if (body.autoScrape !== false && body.area && events.length < 6) {
     try {
-      discovered = await discoverAndScrape(c.env, { area: body.area, interests: body.interests });
+      discovered = await discoverAndScrape(c.env, {
+        area: body.area,
+        interests: body.interests,
+        keyword: body.keyword,
+      });
     } catch (err) {
       discovered = { total: 0, docs: [] };
       console.error('discover failed:', err);
@@ -229,7 +233,11 @@ api.post('/plan', async (c) => {
   // AI概算より優先する。未設定なら空配列でAI概算のまま。
   let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
   try {
-    realHotels = await fetchRakutenHotels(c.env, body.area, reqOrigin(c.req.url));
+    realHotels = await fetchRakutenHotels(c.env, body.area, reqOrigin(c.req.url), {
+      keywords: body.hotelFeatures,
+      maxPrice: body.budget,
+      limit: 12,
+    });
   } catch {
     realHotels = [];
   }

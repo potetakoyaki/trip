@@ -70,6 +70,11 @@ async function loadCategories(preselect) {
   }
 }
 
+function getHotelFeatures() {
+  const vals = Array.from(document.querySelectorAll('.hotel-feat:checked')).map((c) => c.value);
+  return vals.length ? vals : undefined;
+}
+
 function fillForm(req) {
   if (!req) return;
   const set = (id, v) => {
@@ -85,6 +90,11 @@ function fillForm(req) {
   set('weather', req.weather);
   set('companions', req.companions);
   set('vibe', req.vibe);
+  set('keyword', req.keyword);
+  const feats = new Set(req.hotelFeatures || []);
+  document.querySelectorAll('.hotel-feat').forEach((c) => {
+    c.checked = feats.has(c.value);
+  });
 }
 
 async function sharePlan() {
@@ -136,6 +146,8 @@ async function submitPlan(ev) {
       vibe: $('vibe').value || undefined,
       origin: $('origin').value.trim() || undefined,
       transport: $('transport').value || undefined,
+      keyword: $('keyword').value.trim() || undefined,
+      hotelFeatures: getHotelFeatures(),
       autoScrape,
     };
     const data = await api('/plan', {
@@ -251,9 +263,9 @@ function renderHotels(hotels) {
     })
     .join('');
   return `<div class="info-card">
-    <div class="info-h">🏨 宿泊の候補</div>
+    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・予算内/安い順）</div>
     ${list}
-    <p class="info-note">※価格は目安です。空室・料金は予約サイトでご確認ください。</p>
+    <p class="info-note">※価格は目安です。空室・料金・プランは予約ページでご確認ください。</p>
   </div>`;
 }
 

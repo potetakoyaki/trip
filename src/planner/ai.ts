@@ -106,6 +106,7 @@ export async function generateAiPlan(
   if (req.weather === 'sunny') cond.push('天気: 晴れ（屋外・景色を優先）');
   if (req.companions) cond.push(`同行者: ${req.companions}`);
   if (req.vibe) cond.push(`テーマの志向: ${req.vibe}`);
+  if (req.keyword) cond.push(`重視キーワード: 「${req.keyword}」に関するスポット/イベントがあれば必ず入れて中心に据える`);
 
   const travelReq = req.origin
     ? `- travel: 「${req.origin}」から「${req.area ?? '旅行先'}」へ${req.transport ?? '公共交通機関'}で行く場合の目安。mode(手段), distance(距離の目安 例"80km"), duration(片道の所要 例"約90分"), costRoundTrip(往復の目安・円の数値), note(具体的な経路・乗換・路線/高速道路名など)。`

@@ -234,6 +234,28 @@ select:focus {
   cursor: pointer;
 }
 
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  margin: 0;
+  cursor: pointer;
+}
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
 /* primary button */
 .btn-primary {
   width: 100%;

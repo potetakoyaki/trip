@@ -26,7 +26,7 @@ const BROWSER_UA =
  */
 export async function discoverAndScrape(
   env: Env,
-  opts: { area: string; interests?: string[] },
+  opts: { area: string; interests?: string[]; keyword?: string },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
   const empty: DiscoverResult = { total: 0, docs: [], stats: { candidates: 0, fetched: 0, engine: null } };
@@ -34,7 +34,7 @@ export async function discoverAndScrape(
   if (!env.AI) return { ...empty, note: 'Workers AI(env.AI) が無効です' };
 
   const http = new HttpClient({ userAgent: BROWSER_UA });
-  const queries = buildQueries(area, opts.interests);
+  const queries = buildQueries(area, opts.interests, opts.keyword);
 
   const docs: { source: string; url: string; text: string }[] = [];
   let engine: string | null = null;
@@ -278,13 +278,16 @@ export function extractBingLinks(html: string): string[] {
   return out;
 }
 
-function buildQueries(area: string, interests?: string[]): string[] {
-  const queries = [
+function buildQueries(area: string, interests?: string[], keyword?: string): string[] {
+  const queries: string[] = [];
+  // キーワード（花火 等）があれば最優先で検索
+  if (keyword && keyword.trim()) queries.push(`${area} ${keyword.trim()}`);
+  queries.push(
     `${area} 観光 おすすめ スポット`,
     `${area} グルメ カフェ ランチ 名物 おすすめ`,
     `${area} イベント 体験 アクティビティ レジャー 遊び`,
     `${area} 旅行 ブログ モデルコース`,
-  ];
+  );
   if (interests && interests.length) {
     queries.push(`${area} ${interests.slice(0, 2).join(' ')} おすすめ`);
   }

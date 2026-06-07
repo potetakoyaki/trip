@@ -89,6 +89,10 @@ export interface PlanRequest {
   origin?: string;
   /** 移動手段（電車 / 新幹線 / 車 / 飛行機 / バス）。 */
   transport?: string;
+  /** やりたいこと等のフリーワード（例: 花火 / 紅葉 / 美術館）。 */
+  keyword?: string;
+  /** ホテルの希望条件（例: 温泉 / 露天風呂 / 夕食付き / リゾート）。 */
+  hotelFeatures?: string[];
 }
 
 export interface PlanItem {
