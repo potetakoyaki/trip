@@ -158,6 +158,8 @@ function validateForm() {
   return true;
 }
 
+let pollTimer = null;
+
 async function deepCollect() {
   const area = $('area').value.trim();
   if (!area) {
@@ -166,35 +168,49 @@ async function deepCollect() {
     return;
   }
   const btn = $('collect-btn');
-  const main = $('submit-btn');
   btn.disabled = true;
-  main.disabled = true;
   const keyword = $('keyword').value.trim() || undefined;
   const interests = [...selectedInterests];
   try {
-    let round = 1;
-    let total = 0;
-    let totalRounds = null;
-    const HARD_CAP = 12;
-    while (round <= HARD_CAP) {
-      setStatus(`じっくり収集中… ラウンド ${round}${totalRounds ? '/' + totalRounds : ''}（合計 ${total} 件）`, '');
-      const r = await api('/collect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ area, keyword, interests, round }),
-      });
-      totalRounds = r.totalRounds || totalRounds;
-      total = r.total ?? total;
-      if (!r.hasMore) break;
-      round++;
-    }
-    setStatus(`収集完了（${esc(area)}・合計 ${total} 件）。「プランを作成する」で使えます。`, 'ok');
+    const r = await api('/collect/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ area, keyword, interests }),
+    });
+    setStatus(
+      `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じてもOK、サーバーが続行します。完了後に「プランを作成する」を押してください。`,
+      'ok',
+    );
+    pollCollect(area);
   } catch (e) {
-    setStatus('収集に失敗: ' + e.message, 'err');
+    setStatus('開始に失敗: ' + e.message, 'err');
   } finally {
     btn.disabled = false;
-    main.disabled = false;
   }
+}
+
+// 開いている間だけ進捗をポーリング（閉じてもサーバー側は継続する）。
+function pollCollect(area) {
+  if (pollTimer) clearTimeout(pollTimer);
+  let tries = 0;
+  const tick = async () => {
+    tries++;
+    try {
+      const s = await api('/collect/status?area=' + encodeURIComponent(area));
+      if (s.found) {
+        if (s.status === 'done') {
+          setStatus(`収集完了（${esc(area)}・合計 ${s.collected} 件）。「プランを作成する」で使えます。`, 'ok');
+          return;
+        }
+        const doneRounds = Math.max(0, s.round - 1);
+        setStatus(`じっくり収集中… ${doneRounds}/${s.totalRounds} ラウンド完了（合計 ${s.collected} 件）。画面を閉じてもOK。`, '');
+      }
+    } catch {
+      /* 一時失敗は無視 */
+    }
+    if (tries < 80) pollTimer = setTimeout(tick, 8000);
+  };
+  pollTimer = setTimeout(tick, 6000);
 }
 
 async function submitPlan(ev) {

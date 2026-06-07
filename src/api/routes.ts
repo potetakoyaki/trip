@@ -2,15 +2,19 @@ import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape, roundQueries } from '../scrape/autosource';
+import { processOneRound } from '../scrape/collect-job';
 import { fetchRakutenHotels, rakutenHotelSearch } from '../scrape/hotels';
 import {
   createSource,
   deleteSource,
+  ensureJobsTable,
+  getJob,
   getPlan,
   getSources,
   insertDemoEvents,
   savePlan,
   searchEvents,
+  startJob,
   updateSource,
 } from '../db/repository';
 import { generatePlan } from '../planner/planner';
@@ -236,6 +240,38 @@ api.post('/collect', async (c) => {
   }
   const total = (await searchEvents(c.env.DB, { area, limit: 500 })).length;
   return c.json({ round, totalRounds, hasMore: round < totalRounds, added, total, engine, note });
+});
+
+// バックグラウンドのじっくり収集を開始する。画面を閉じても Cron が続行する。
+api.post('/collect/start', async (c) => {
+  const raw = await c.req.json<any>().catch(() => null);
+  const area = str(raw?.area, 80);
+  if (!area) return c.json({ error: 'エリアが必要です' }, 400);
+  const keyword = str(raw?.keyword, 80);
+  const interests = strArr(raw?.interests);
+  await ensureJobsTable(c.env.DB);
+  const { totalRounds } = roundQueries(area, 1, keyword);
+  await startJob(c.env.DB, { area, keyword, interests, totalRounds, now: new Date().toISOString() });
+  // 最初の1ラウンドはこのリクエストのバックグラウンドで即実行（待たずに返す）。
+  c.executionCtx.waitUntil(processOneRound(c.env, area).catch(() => {}));
+  return c.json({ ok: true, area, totalRounds });
+});
+
+// じっくり収集の進捗を取得する。
+api.get('/collect/status', async (c) => {
+  const area = c.req.query('area');
+  if (!area) return c.json({ error: 'area が必要です' }, 400);
+  await ensureJobsTable(c.env.DB);
+  const job = await getJob(c.env.DB, area);
+  if (!job) return c.json({ found: false });
+  return c.json({
+    found: true,
+    area: job.area,
+    round: job.round,
+    totalRounds: job.total_rounds,
+    status: job.status,
+    collected: job.collected,
+  });
 });
 
 // 動作確認用のサンプルデータ投入。
