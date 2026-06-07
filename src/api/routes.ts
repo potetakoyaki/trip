@@ -8,6 +8,8 @@ import { createPlan } from '../planner/create-plan';
 import {
   addVisited,
   addWishlist,
+  cancelCollectJob,
+  cancelPlanJob,
   createPlanJob,
   createSource,
   deleteSource,
@@ -327,6 +329,16 @@ api.post('/collect/start', async (c) => {
   return c.json({ ok: true, area, totalRounds });
 });
 
+// じっくり収集をキャンセルする（以降のラウンドを止める）。
+api.post('/collect/cancel', async (c) => {
+  const raw = await c.req.json<any>().catch(() => null);
+  const area = str(raw?.area, 80);
+  if (!area) return c.json({ error: 'エリアが必要です' }, 400);
+  await ensureJobsTable(c.env.DB);
+  const ok = await cancelCollectJob(c.env.DB, area, new Date().toISOString());
+  return c.json({ ok });
+});
+
 // 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
 api.get('/areas/similar', async (c) => {
   const area = (c.req.query('area') || '').trim();
@@ -408,6 +420,16 @@ api.post('/plan/start', async (c) => {
   });
   c.executionCtx.waitUntil(runPlanJob(c.env, jobId).catch(() => {}));
   return c.json({ ok: true, jobId });
+});
+
+// プラン作成（バックグラウンド）をキャンセルする。
+api.post('/plan/cancel', async (c) => {
+  const raw = await c.req.json<any>().catch(() => null);
+  const jobId = str(raw?.jobId, 60);
+  if (!jobId) return c.json({ error: 'jobId が必要です' }, 400);
+  await ensurePlanJobs(c.env.DB);
+  const ok = await cancelPlanJob(c.env.DB, jobId, new Date().toISOString());
+  return c.json({ ok });
 });
 
 // プラン作成ジョブの進捗を取得する。

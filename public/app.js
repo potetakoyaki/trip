@@ -439,6 +439,56 @@ function validateForm() {
 
 let pollTimer = null;
 
+// バックグラウンド処理（プラン作成 / じっくり収集）のキャンセル管理。
+// bgGen を増やすと、進行中のポーリングは自分の世代と一致しなくなり停止する。
+let bgGen = 0;
+let activeOp = null;
+
+function showCancel() {
+  const b = $('cancel-btn');
+  if (b) b.classList.remove('hidden');
+}
+function hideCancel() {
+  const b = $('cancel-btn');
+  if (b) b.classList.add('hidden');
+}
+
+// 進行中のバックグラウンド処理をキャンセルする。
+async function cancelOp() {
+  const op = activeOp;
+  bgGen++; // 進行中のポーリングを無効化
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  stopPlanProgress();
+  activeOp = null;
+  if (op) {
+    try {
+      if (op.type === 'plan' && op.jobId) {
+        await api('/plan/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId: op.jobId }),
+        });
+      } else if (op.type === 'collect' && op.area) {
+        await api('/collect/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ area: op.area }),
+        });
+      }
+    } catch {
+      /* キャンセル通知の失敗は無視（ポーリングは既に停止済み） */
+    }
+  }
+  clearBusy();
+  setBusy(false);
+  hideProgressBar();
+  hideCancel();
+  setStatus('処理をキャンセルしました。', '');
+}
+
 function showProgress(doneRounds, totalRounds, collected, done) {
   const wrap = $('collect-progress');
   wrap.classList.remove('hidden');
@@ -473,14 +523,24 @@ async function resolveArea(area) {
 }
 
 async function deepCollect() {
-  let area = $('area').value.trim();
-  if (!area) {
+  // 必須チェック: エリアは必須（ブラウザ標準の警告も表示）。
+  const area0 = $('area').value.trim();
+  if (!area0) {
+    $('area').reportValidity();
     setStatus('エリア・行き先を入力してください。', 'err');
     $('area').focus();
     return;
   }
+  // 本当に収集するか確認する（時間と無料枠を使うため）。
+  if (
+    !confirm(
+      `「${area0}」をじっくり収集しますか？\n\nバックグラウンドで数分かけて情報を集めます（無料のAI枠を使います）。\n途中でキャンセルもできます。`,
+    )
+  ) {
+    return;
+  }
   setBusy(true);
-  area = await resolveArea(area);
+  let area = await resolveArea(area0);
   const keyword = $('keyword').value.trim() || undefined;
   const interests = [...selectedInterests];
   showIndet('収集できるか確認中…');
@@ -505,13 +565,16 @@ async function deepCollect() {
       setStatus(r.message || `追加分を収集しました（合計 ${r.total} 件）。`, 'ok');
       return;
     }
+    const gen = ++bgGen;
+    activeOp = { type: 'collect', area, gen };
     saveBusy({ type: 'collect', area });
     setStatus(
       `バックグラウンドで収集を開始しました（最大${r.totalRounds}ラウンド・数分）。画面を閉じても・更新してもOK、サーバーが続行します。`,
       'ok',
     );
     showProgress(0, r.totalRounds, 0, false);
-    pollCollect(area);
+    showCancel();
+    pollCollect(area, gen);
   } catch (e) {
     hideProgressBar();
     setBusy(false);
@@ -521,17 +584,30 @@ async function deepCollect() {
 }
 
 // 開いている間だけ進捗をポーリング（閉じてもサーバー側は継続。リロードでも再開）。
-function pollCollect(area) {
+function pollCollect(area, gen) {
   if (pollTimer) clearTimeout(pollTimer);
   let tries = 0;
   const tick = async () => {
+    if (gen !== bgGen) return; // キャンセル等で世代が変わったら停止
     tries++;
     try {
       const s = await api('/collect/status?area=' + encodeURIComponent(area));
+      if (gen !== bgGen) return;
       if (s.found) {
         const doneRounds = Math.max(0, s.round - 1);
+        if (s.status === 'cancelled') {
+          hideProgressBar();
+          hideCancel();
+          activeOp = null;
+          setBusy(false);
+          clearBusy();
+          setStatus('じっくり収集をキャンセルしました。', '');
+          return;
+        }
         if (s.status === 'done') {
           showProgress(s.totalRounds, s.totalRounds, s.collected, true);
+          hideCancel();
+          activeOp = null;
           setStatus(`収集完了（${esc(area)}・合計 ${s.collected} 件）。「プランを作成する」で使えます。`, 'ok');
           setBusy(false);
           clearBusy();
@@ -548,6 +624,8 @@ function pollCollect(area) {
     } else {
       setBusy(false);
       clearBusy();
+      hideCancel();
+      activeOp = null;
     }
   };
   pollTimer = setTimeout(tick, 6000);
@@ -568,7 +646,6 @@ function buildPlanBody() {
     transport: $('transport').value || undefined,
     keyword: $('keyword').value.trim() || undefined,
     hotelFeatures: getHotelFeatures(),
-    autoScrape: $('autoScrape').checked,
     eco: $('eco').checked,
   };
 }
@@ -622,10 +699,13 @@ async function submitPlan(ev) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    const gen = ++bgGen;
+    activeOp = { type: 'plan', jobId: r.jobId, gen };
     saveBusy({ type: 'plan', jobId: r.jobId });
     setStatus('プランを作成中…（画面を閉じても作成は続きます。あとで開き直すと結果が出ます）', '');
     startPlanProgress();
-    pollPlanJob(r.jobId);
+    showCancel();
+    pollPlanJob(r.jobId, gen);
   } catch (e) {
     stopPlanProgress();
     hideProgressBar();
@@ -677,8 +757,9 @@ function hideProgressBar() {
   fill.style.width = '0%';
 }
 
-async function pollPlanJob(jobId) {
+async function pollPlanJob(jobId, gen) {
   for (let i = 0; i < 160; i++) {
+    if (gen !== bgGen) return; // キャンセル等で世代が変わったら停止
     let s;
     try {
       s = await api('/plan-status?id=' + encodeURIComponent(jobId));
@@ -686,9 +767,22 @@ async function pollPlanJob(jobId) {
       await sleep(3000);
       continue;
     }
+    if (gen !== bgGen) return;
+    if (s.found && s.status === 'cancelled') {
+      stopPlanProgress();
+      hideProgressBar();
+      hideCancel();
+      activeOp = null;
+      clearBusy();
+      setBusy(false);
+      setStatus('プラン作成をキャンセルしました。', '');
+      return;
+    }
     if (s.found && s.status === 'done' && s.planId) {
       stopPlanProgress();
       hideProgressBar();
+      hideCancel();
+      activeOp = null;
       clearBusy();
       setBusy(false);
       await loadAndRenderSavedPlan(s.planId);
@@ -699,6 +793,8 @@ async function pollPlanJob(jobId) {
     if (s.found && s.status === 'error') {
       stopPlanProgress();
       hideProgressBar();
+      hideCancel();
+      activeOp = null;
       clearBusy();
       setBusy(false);
       setStatus('作成に失敗: ' + (s.error || '不明なエラー'), 'err');
@@ -708,6 +804,8 @@ async function pollPlanJob(jobId) {
   }
   stopPlanProgress();
   hideProgressBar();
+  hideCancel();
+  activeOp = null;
   setBusy(false);
   setStatus('時間がかかっています。少し待ってから再読み込みしてください。', '');
 }
@@ -1090,6 +1188,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('menu-btn').addEventListener('click', openDrawer);
   $('drawer-close').addEventListener('click', closeDrawer);
   $('drawer-overlay').addEventListener('click', closeDrawer);
+  $('cancel-btn').addEventListener('click', cancelOp);
 
   $('history-refresh').addEventListener('click', loadHistory);
   $('history-list').addEventListener('click', (ev) => {
@@ -1160,14 +1259,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   // 進行中の処理（プラン作成 / じっくり収集）があればリロード後も再開＆進捗表示。
   const busy = readBusy();
   if (busy && busy.type === 'plan' && busy.jobId) {
+    const gen = ++bgGen;
+    activeOp = { type: 'plan', jobId: busy.jobId, gen };
     setBusy(true);
     setStatus('プラン作成を再開しています…', '');
     startPlanProgress();
-    pollPlanJob(busy.jobId);
+    showCancel();
+    pollPlanJob(busy.jobId, gen);
   } else if (busy && busy.type === 'collect' && busy.area) {
+    const gen = ++bgGen;
+    activeOp = { type: 'collect', area: busy.area, gen };
     setBusy(true);
     setStatus('じっくり収集を再開しています…', '');
     showProgress(0, 6, 0, false);
-    pollCollect(busy.area);
+    showCancel();
+    pollCollect(busy.area, gen);
   }
 });
