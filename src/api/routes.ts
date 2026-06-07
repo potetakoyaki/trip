@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
+import { discoverAndScrape } from '../scrape/autosource';
 import {
   createSource,
   deleteSource,
@@ -93,11 +94,21 @@ api.delete('/sources/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// スクレイピングを手動実行。?source=<id> で個別実行。
+// スクレイピングを手動実行。?source=<id> で個別実行、?area=<エリア> で自動収集も実行。
 api.post('/scrape', async (c) => {
   const sourceId = c.req.query('source') ?? undefined;
+  const area = c.req.query('area')?.trim() || undefined;
   const summary = await runScrape(c.env, { sourceId });
-  return c.json(summary);
+  let discovered: { total: number; docs: { source: string; url: string }[] } | null = null;
+  if (area && !sourceId) {
+    try {
+      discovered = await discoverAndScrape(c.env, { area });
+    } catch (err) {
+      discovered = { total: 0, docs: [] };
+      console.error('discover failed:', err);
+    }
+  }
+  return c.json({ ...summary, discovered });
 });
 
 // 動作確認用のサンプルデータ投入。
@@ -140,12 +151,32 @@ api.post('/plan', async (c) => {
   }
 
   // 候補イベントを取得（日付不明のスポット/宿も含まれる）
-  const events = await searchEvents(c.env.DB, {
+  let events = await searchEvents(c.env.DB, {
     area: body.area,
     from: body.startDate,
     to: body.endDate,
     limit: 300,
   });
+
+  // 設定ソースが無くても、エリア名から自動で大手サイト/ブログを集めて補完する。
+  // 既に十分な候補があるエリアでは再収集しない（検索・AIの無駄打ちを避ける）。
+  let discovered: { total: number; docs: { source: string; url: string }[] } | null = null;
+  if (body.autoScrape !== false && body.area && events.length < 6) {
+    try {
+      discovered = await discoverAndScrape(c.env, { area: body.area, interests: body.interests });
+    } catch (err) {
+      discovered = { total: 0, docs: [] };
+      console.error('discover failed:', err);
+    }
+    if (discovered && discovered.total > 0) {
+      events = await searchEvents(c.env.DB, {
+        area: body.area,
+        from: body.startDate,
+        to: body.endDate,
+        limit: 300,
+      });
+    }
+  }
 
   let plan;
   try {
@@ -157,7 +188,7 @@ api.post('/plan', async (c) => {
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   await savePlan(c.env.DB, id, createdAt, body, plan);
-  return c.json({ id, createdAt, candidateCount: events.length, plan, scrape });
+  return c.json({ id, createdAt, candidateCount: events.length, plan, scrape, discovered });
 });
 
 api.get('/plan/:id', async (c) => {

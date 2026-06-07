@@ -138,7 +138,7 @@ async function submitPlan(ev) {
   const btn = ev.submitter;
   if (btn) btn.disabled = true;
   const autoScrape = $('autoScrape').checked;
-  setStatus(autoScrape ? '最新情報を取得してプランを作成中...' : 'プランを作成中...');
+  setStatus(autoScrape ? '大手サイト・ブログから情報収集してプランを作成中...（初回は数十秒かかります）' : 'プランを作成中...');
   try {
     const body = {
       area: $('area').value.trim() || undefined,
@@ -156,9 +156,11 @@ async function submitPlan(ev) {
       body: JSON.stringify(body),
     });
     renderPlan(data);
-    let extra = '';
-    if (data.scrape && data.scrape.ran) extra = ` / 最新取得 ${data.scrape.total} 件`;
-    setStatus(`完成（候補 ${data.candidateCount} 件 / エンジン: ${data.plan.engine}${extra}）`, 'ok');
+    const extra = [];
+    if (data.discovered && data.discovered.total) extra.push(`自動収集 ${data.discovered.total}件`);
+    if (data.scrape && data.scrape.ran && data.scrape.total) extra.push(`登録ソース ${data.scrape.total}件`);
+    const suffix = extra.length ? ` / ${extra.join(' / ')}` : '';
+    setStatus(`完成（候補 ${data.candidateCount}件${suffix}）`, 'ok');
     if (autoScrape) loadSources();
   } catch (e) {
     setStatus('エラー: ' + e.message, 'err');
@@ -231,25 +233,31 @@ async function runDemo(ev) {
 async function runScrape(ev) {
   const btn = ev.currentTarget;
   btn.disabled = true;
-  setStatus('スクレイピングを実行中...（有効なソースのみ）');
+  const area = $('area').value.trim();
+  setStatus(area ? `「${area}」の情報を収集中...（初回は数十秒かかります）` : 'スクレイピングを実行中...（登録ソース）');
   try {
-    const summary = await api('/scrape', { method: 'POST' });
+    const path = '/scrape' + (area ? '?area=' + encodeURIComponent(area) : '');
+    const summary = await api(path, { method: 'POST' });
     const results = summary.results || [];
     const ok = results.filter((r) => r.status === 'ok').length;
-    const skipped = results.filter((r) => r.status === 'skipped');
     const failed = results.filter((r) => r.status === 'error');
+    const discovered = (summary.discovered && summary.discovered.total) || 0;
     await loadSources();
 
-    if (results.length === 0) {
-      setStatus('有効なソースがありません。sources テーブルで対象を有効化してください（README参照）。', 'err');
+    const parts = [];
+    if (discovered) parts.push(`自動収集 ${discovered}件`);
+    if (ok) parts.push(`登録ソース ${summary.total}件`);
+
+    if (discovered || ok) {
+      let msg = '完了: ' + parts.join(' / ');
+      if (failed.length) msg += ` / 一部失敗: ${failed.map((r) => r.source + ': ' + r.message).join(' / ')}`;
+      setStatus(msg, 'ok');
     } else if (failed.length) {
-      const detail = failed.map((r) => `${r.source}: ${r.message}`).join(' / ');
-      setStatus(`一部失敗（取得 ${summary.total} 件 / 成功 ${ok}）。失敗: ${detail}`, 'err');
-    } else if (ok === 0 && skipped.length) {
-      const detail = skipped.map((r) => `${r.source}: ${r.message}`).join(' / ');
-      setStatus(`実行対象なし（スキップ）。${detail}`, 'err');
+      setStatus('失敗: ' + failed.map((r) => `${r.source}: ${r.message}`).join(' / '), 'err');
+    } else if (area) {
+      setStatus(`「${area}」の情報が見つかりませんでした。別の地名やキーワードを試してください。`, 'err');
     } else {
-      setStatus(`完了: ${summary.total} 件取得 / 成功 ${ok} ソース。`, 'ok');
+      setStatus('エリアを入力して実行すると、自動で大手サイト・ブログから収集します。', 'err');
     }
   } catch (e) {
     setStatus('エラー: ' + e.message, 'err');

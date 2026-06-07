@@ -3,7 +3,8 @@ import { parseRss } from '../src/scrape/rss';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 import { robotsAllows } from '../src/scrape/robots';
 import { extractReadableText } from '../src/scrape/readable';
-import { parseSpotArray } from '../src/sources/blog';
+import { parseSpotArray } from '../src/scrape/ai-extract';
+import { extractDdgLinks } from '../src/scrape/autosource';
 
 describe('parseRss', () => {
   it('RSS の item を抽出する', () => {
@@ -156,5 +157,24 @@ describe('parseSpotArray（AI応答からJSON配列を抽出）', () => {
 
   it('壊れたJSONは空配列', () => {
     expect(parseSpotArray('[{"title": broken')).toEqual([]);
+  });
+});
+
+describe('extractDdgLinks（検索結果から実URL抽出）', () => {
+  it('uddg リダイレクトから実URLを復元し重複を除く', () => {
+    const enc = encodeURIComponent('https://www.jalan.net/kankou/box.html');
+    const enc2 = encodeURIComponent('https://travel.blog.example.jp/hakone');
+    const html = `
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=${enc}&rut=x">じゃらん 箱根</a>
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=${enc2}">箱根ブログ</a>
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=${enc}">じゃらん（重複）</a>`;
+    const links = extractDdgLinks(html);
+    expect(links).toContain('https://www.jalan.net/kankou/box.html');
+    expect(links).toContain('https://travel.blog.example.jp/hakone');
+    expect(links).toHaveLength(2); // 重複は除外
+  });
+
+  it('結果が無ければ空配列', () => {
+    expect(extractDdgLinks('<html>no results</html>')).toEqual([]);
   });
 });
