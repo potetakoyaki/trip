@@ -66,19 +66,53 @@
       </section>
 
       <section id="sources-section" class="card">
-        <h2>データソースの状態</h2>
+        <h2>データソース（スクレイピング元）</h2>
+
+        <details class="add-source">
+          <summary>＋ スクレイピング元を追加</summary>
+          <form id="source-form">
+            <div class="row two">
+              <label>種類
+                <select id="src-driver">
+                  <option value="rss">RSS / Atom フィード</option>
+                  <option value="jsonld">イベントページ（JSON-LD自動抽出）</option>
+                </select>
+              </label>
+              <label>都道府県（任意）
+                <input type="text" id="src-pref" placeholder="例: 長野県" />
+              </label>
+            </div>
+            <div class="row">
+              <label>URL
+                <input type="text" id="src-url" placeholder="https://.../feed.xml もしくは イベント一覧ページのURL" />
+              </label>
+            </div>
+            <div class="row two">
+              <label>表示名（任意）
+                <input type="text" id="src-name" placeholder="例: 長野県観光協会RSS" />
+              </label>
+              <label>カテゴリ（任意・RSS用）
+                <input type="text" id="src-cat" placeholder="例: 観光" />
+              </label>
+            </div>
+            <div class="actions">
+              <button type="submit" class="primary">追加して有効化</button>
+            </div>
+          </form>
+          <p class="hint">
+            ⚠️ 追加先サイトの<strong>利用規約・robots.txt を必ず確認</strong>してください。取得は
+            robots尊重・低頻度・キャッシュ付きで行われますが、規約でスクレイピングを禁じているサイト
+            （大手予約サイト等）は避けてください。可能なら公式API・RSS・JSON-LD公開ページを選ぶのが安全です。
+          </p>
+        </details>
+
         <button type="button" id="refresh-sources" class="ghost small">更新</button>
         <table id="sources-table">
           <thead>
-            <tr><th>ID</th><th>名前</th><th>有効</th><th>最終実行</th><th>状態</th></tr>
+            <tr><th>名前</th><th>種類</th><th>有効</th><th>状態</th><th>操作</th></tr>
           </thead>
           <tbody></tbody>
         </table>
-        <p class="hint">
-          大手予約サイトの多くは規約でスクレイピングを禁じています。公式API（楽天トラベル / connpass）や、
-          各ページの schema.org JSON-LD、観光協会の RSS を使うのが安全です。
-          ソースの設定は D1 の <code>sources</code> テーブルで管理します（README参照）。
-        </p>
       </section>
     </main>
 

@@ -51,18 +51,83 @@ async function loadSources() {
     const { sources } = await api('/sources');
     const tbody = $('sources-table').querySelector('tbody');
     tbody.innerHTML = '';
+    if (!sources.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="hint">ソースがありません。「＋ スクレイピング元を追加」から登録してください。</td></tr>';
+      return;
+    }
     sources.forEach((s) => {
+      const driver = (s.config && s.config.driver) || s.kind || '—';
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td><code>${esc(s.id)}</code></td>
         <td>${esc(s.name)}</td>
+        <td>${esc(driver)}</td>
         <td>${s.enabled ? '<span class="badge-on">有効</span>' : '<span class="badge-off">無効</span>'}</td>
-        <td>${s.last_run_at ? new Date(s.last_run_at).toLocaleString('ja-JP') : '—'}</td>
-        <td>${esc(s.last_status || '—')}</td>`;
+        <td>${esc(s.last_status || '—')}</td>
+        <td class="src-actions">
+          <button class="ghost small" data-action="toggle" data-id="${esc(s.id)}" data-enabled="${s.enabled ? 1 : 0}">${s.enabled ? '無効化' : '有効化'}</button>
+          <button class="ghost small danger" data-action="delete" data-id="${esc(s.id)}" data-name="${esc(s.name)}">削除</button>
+        </td>`;
       tbody.appendChild(tr);
     });
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function addSource(ev) {
+  ev.preventDefault();
+  const btn = ev.submitter;
+  if (btn) btn.disabled = true;
+  setStatus('スクレイピング元を追加中...');
+  try {
+    const body = {
+      driver: $('src-driver').value,
+      url: $('src-url').value.trim(),
+      prefecture: $('src-pref').value.trim() || undefined,
+      name: $('src-name').value.trim() || undefined,
+      category: $('src-cat').value.trim() || undefined,
+      enabled: true,
+    };
+    await api('/sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    $('source-form').reset();
+    await loadSources();
+    setStatus('追加しました。「スクレイピング実行」で取得できます。', 'ok');
+  } catch (e) {
+    setStatus('追加に失敗: ' + e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function onSourceAction(ev) {
+  const btn = ev.target.closest('button[data-action]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const action = btn.dataset.action;
+  btn.disabled = true;
+  try {
+    if (action === 'toggle') {
+      const enabled = btn.dataset.enabled === '1';
+      await api('/sources/' + encodeURIComponent(id), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !enabled }),
+      });
+    } else if (action === 'delete') {
+      if (!confirm(`「${btn.dataset.name}」を削除しますか？`)) {
+        btn.disabled = false;
+        return;
+      }
+      await api('/sources/' + encodeURIComponent(id), { method: 'DELETE' });
+    }
+    await loadSources();
+  } catch (e) {
+    setStatus('操作に失敗: ' + e.message, 'err');
+    btn.disabled = false;
   }
 }
 
@@ -208,4 +273,6 @@ window.addEventListener('DOMContentLoaded', () => {
   $('demo-btn').addEventListener('click', runDemo);
   $('scrape-btn').addEventListener('click', runScrape);
   $('refresh-sources').addEventListener('click', loadSources);
+  $('source-form').addEventListener('submit', addSource);
+  $('sources-table').querySelector('tbody').addEventListener('click', onSourceAction);
 });

@@ -41,6 +41,49 @@ export async function updateSourceStatus(
     .run();
 }
 
+/** ソースを新規作成。 */
+export async function createSource(
+  db: D1Database,
+  s: { id: string; name: string; kind: string; base_url?: string | null; config: object; enabled: boolean },
+): Promise<void> {
+  await db
+    .prepare('INSERT INTO sources (id, name, kind, base_url, config, enabled) VALUES (?,?,?,?,?,?)')
+    .bind(s.id, s.name, s.kind, s.base_url ?? null, JSON.stringify(s.config), s.enabled ? 1 : 0)
+    .run();
+}
+
+/** ソースの有効/無効・設定・名前を更新。変更があれば true。 */
+export async function updateSource(
+  db: D1Database,
+  id: string,
+  patch: { enabled?: boolean; config?: object; name?: string },
+): Promise<boolean> {
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  if (patch.enabled !== undefined) {
+    sets.push('enabled = ?');
+    binds.push(patch.enabled ? 1 : 0);
+  }
+  if (patch.config !== undefined) {
+    sets.push('config = ?');
+    binds.push(JSON.stringify(patch.config));
+  }
+  if (patch.name !== undefined) {
+    sets.push('name = ?');
+    binds.push(patch.name);
+  }
+  if (!sets.length) return false;
+  binds.push(id);
+  const res = await db.prepare(`UPDATE sources SET ${sets.join(', ')} WHERE id = ?`).bind(...binds).run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
+/** ソースを削除。 */
+export async function deleteSource(db: D1Database, id: string): Promise<boolean> {
+  const res = await db.prepare('DELETE FROM sources WHERE id = ?').bind(id).run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */
 export async function upsertEvents(
   db: D1Database,

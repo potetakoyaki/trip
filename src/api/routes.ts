@@ -2,11 +2,14 @@ import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import {
+  createSource,
+  deleteSource,
   getPlan,
   getSources,
   insertDemoEvents,
   savePlan,
   searchEvents,
+  updateSource,
 } from '../db/repository';
 import { generatePlan } from '../planner/planner';
 import { ALL_CATEGORIES } from '../util/normalize';
@@ -22,6 +25,63 @@ api.get('/categories', (c) => c.json({ categories: ALL_CATEGORIES }));
 api.get('/sources', async (c) => {
   const sources = await getSources(c.env.DB);
   return c.json({ sources });
+});
+
+// ブラウザからスクレイピング元を追加（キー不要の rss / jsonld のみ）。
+api.post('/sources', async (c) => {
+  const body = await c.req.json<any>().catch(() => null);
+  if (!body) return c.json({ error: 'JSON ボディが不正です' }, 400);
+
+  const driver = String(body.driver ?? '');
+  const url = String(body.url ?? '').trim();
+  const name = String(body.name ?? '').trim();
+  if (driver !== 'rss' && driver !== 'jsonld') {
+    return c.json({ error: 'driver は rss か jsonld を指定してください' }, 400);
+  }
+  let origin: string;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error();
+    origin = u.origin;
+  } catch {
+    return c.json({ error: '有効な URL（http/https）を入力してください' }, 400);
+  }
+
+  const prefecture = body.prefecture ? String(body.prefecture) : undefined;
+  const config =
+    driver === 'rss'
+      ? { driver: 'rss', feedUrl: url, category: body.category ? String(body.category) : undefined, prefecture }
+      : { driver: 'jsonld', pageUrls: [url], prefecture };
+  const id = `${driver}-${crypto.randomUUID().slice(0, 8)}`;
+  const kind = driver === 'rss' ? 'rss' : 'html';
+
+  await createSource(c.env.DB, {
+    id,
+    name: name || url,
+    kind,
+    base_url: origin,
+    config,
+    enabled: body.enabled !== false,
+  });
+  return c.json({ ok: true, id });
+});
+
+// ソースの有効/無効・設定・名前を更新。
+api.patch('/sources/:id', async (c) => {
+  const body = await c.req.json<any>().catch(() => ({}));
+  const patch: { enabled?: boolean; config?: object; name?: string } = {};
+  if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+  if (body.config && typeof body.config === 'object') patch.config = body.config;
+  if (typeof body.name === 'string') patch.name = body.name;
+  const ok = await updateSource(c.env.DB, c.req.param('id'), patch);
+  if (!ok) return c.json({ error: '更新対象が見つからないか、変更内容がありません' }, 404);
+  return c.json({ ok: true });
+});
+
+api.delete('/sources/:id', async (c) => {
+  const ok = await deleteSource(c.env.DB, c.req.param('id'));
+  if (!ok) return c.json({ error: 'not found' }, 404);
+  return c.json({ ok: true });
 });
 
 // スクレイピングを手動実行。?source=<id> で個別実行。

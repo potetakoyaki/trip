@@ -151,6 +151,24 @@ th { color: var(--muted); font-weight: 600; }
 .badge-on { color: var(--ok); font-weight: 700; }
 .badge-off { color: var(--muted); }
 
+.add-source {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: #fcfdff;
+}
+.add-source summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--primary);
+}
+.add-source form { margin-top: 12px; }
+.src-actions { white-space: nowrap; }
+.src-actions button { margin-right: 4px; }
+button.danger { color: var(--err); }
+button.danger:hover { background: #fef2f2; }
+
 .hint { font-size: 0.8rem; color: var(--muted); margin-top: 12px; }
 code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
 
