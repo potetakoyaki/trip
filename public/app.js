@@ -126,8 +126,41 @@ async function loadSharedPlan(id) {
 }
 
 // --- plan ---
+function validateForm() {
+  const area = $('area').value.trim();
+  if (!area) {
+    setStatus('エリア・行き先を入力してください。', 'err');
+    $('area').focus();
+    return false;
+  }
+  const s = $('startDate').value;
+  const e = $('endDate').value;
+  if (!s || !e) {
+    setStatus('開始日と終了日を入力してください。', 'err');
+    return false;
+  }
+  if (e < s) {
+    setStatus('終了日は開始日以降にしてください。', 'err');
+    $('endDate').focus();
+    return false;
+  }
+  const days = Math.round((new Date(e + 'T00:00:00Z') - new Date(s + 'T00:00:00Z')) / 86400000) + 1;
+  if (days > 31) {
+    setStatus('旅行期間が長すぎます（最大31日）。', 'err');
+    return false;
+  }
+  const b = $('budget').value;
+  if (b !== '' && Number(b) < 0) {
+    setStatus('予算は0以上で入力してください。', 'err');
+    $('budget').focus();
+    return false;
+  }
+  return true;
+}
+
 async function submitPlan(ev) {
   ev.preventDefault();
+  if (!validateForm()) return;
   const btn = $('submit-btn');
   btn.disabled = true;
   btn.classList.add('loading');
