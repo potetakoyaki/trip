@@ -34,6 +34,8 @@ export interface NormalizedEvent {
   endAt?: string;
   /** 円。無料は 0、不明は省略。 */
   price?: number;
+  /** 営業時間（本文に記載があれば。例 "9:00-17:00"）。 */
+  hours?: string;
   imageUrl?: string;
   raw?: unknown;
 }
@@ -55,6 +57,7 @@ export interface EventRecord {
   start_at?: string | null;
   end_at?: string | null;
   price?: number | null;
+  hours?: string | null;
   image_url?: string | null;
 }
 
@@ -116,6 +119,8 @@ export interface PlanItem {
   alt?: string;
   /** その場所の目安費用（入場料・飲食代など、円）。 */
   estCost?: number;
+  /** 営業時間（例 "9:00-17:00"）。 */
+  hours?: string;
   /** おおよその緯度（地図・スポット間の移動時間の概算用）。 */
   lat?: number;
   /** おおよその経度。 */
@@ -180,6 +185,10 @@ export interface DayForecast {
 export interface Plan {
   /** プラン全体のテーマ/タイトル。 */
   theme?: string;
+  /** なぜこのスポットの組み合わせ・プランにしたかの選定理由。 */
+  rationale?: string;
+  /** プラン全体を通した楽しみ方の提案。 */
+  enjoyment?: string;
   /** 旅行日の天気予報（Open-Meteo・取得できた場合）。 */
   forecast?: DayForecast[];
   days: PlanDay[];

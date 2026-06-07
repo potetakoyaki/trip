@@ -112,6 +112,7 @@ export async function discoverAndScrape(
             category: s.category || inferCategory(title, s.description) || '観光',
             prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
             city: s.city || area,
+            hours: s.hours?.trim() || undefined,
             raw: { from: doc.source, area },
           });
         }
