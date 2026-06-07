@@ -2,6 +2,22 @@
 
 const $ = (id) => document.getElementById(id);
 const selectedInterests = new Set();
+let currentPlanId = null;
+
+const CAT_EMOJI = {
+  グルメ: '🍜',
+  自然: '🌿',
+  歴史: '⛩️',
+  アート: '🎨',
+  音楽: '🎵',
+  体験: '🎫',
+  宿泊: '♨️',
+  祭り: '🎆',
+  テック: '💻',
+  観光: '📷',
+  イベント: '🎉',
+};
+const catEmoji = (c) => CAT_EMOJI[c] || '📍';
 
 function setStatus(msg, kind = '') {
   const el = $('status');
@@ -16,16 +32,19 @@ async function api(path, options) {
   return data;
 }
 
-// --- 初期化 ---
+// --- dates ---
+function addDays(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 function initDates() {
-  const today = new Date();
-  const inAWeek = new Date(today.getTime() + 7 * 86400000);
-  const end = new Date(inAWeek.getTime() + 86400000);
-  $('startDate').value = inAWeek.toISOString().slice(0, 10);
-  $('endDate').value = end.toISOString().slice(0, 10);
+  const start = addDays(new Date().toISOString().slice(0, 10), 7);
+  $('startDate').value = start;
+  $('endDate').value = addDays(start, 1);
 }
 
-async function loadCategories() {
+async function loadCategories(preselect) {
   try {
     const { categories } = await api('/categories');
     const box = $('interests');
@@ -33,12 +52,17 @@ async function loadCategories() {
     categories.forEach((cat) => {
       const chip = document.createElement('span');
       chip.className = 'chip';
-      chip.textContent = cat;
+      chip.dataset.cat = cat;
+      chip.textContent = `${catEmoji(cat)} ${cat}`;
       chip.addEventListener('click', () => {
         chip.classList.toggle('active');
         if (selectedInterests.has(cat)) selectedInterests.delete(cat);
         else selectedInterests.add(cat);
       });
+      if (preselect && preselect.includes(cat)) {
+        chip.classList.add('active');
+        selectedInterests.add(cat);
+      }
       box.appendChild(chip);
     });
   } catch (e) {
@@ -46,97 +70,69 @@ async function loadCategories() {
   }
 }
 
-async function loadSources() {
+function getHotelFeatures() {
+  const vals = Array.from(document.querySelectorAll('.hotel-feat:checked')).map((c) => c.value);
+  return vals.length ? vals : undefined;
+}
+
+function fillForm(req) {
+  if (!req) return;
+  const set = (id, v) => {
+    if (v != null && v !== '') $(id).value = v;
+  };
+  set('area', req.area);
+  set('origin', req.origin);
+  set('transport', req.transport);
+  set('startDate', req.startDate);
+  set('endDate', req.endDate);
+  set('budget', req.budget);
+  set('pace', req.pace);
+  set('weather', req.weather);
+  set('companions', req.companions);
+  set('vibe', req.vibe);
+  set('keyword', req.keyword);
+  const feats = new Set(req.hotelFeatures || []);
+  document.querySelectorAll('.hotel-feat').forEach((c) => {
+    c.checked = feats.has(c.value);
+  });
+}
+
+async function sharePlan() {
+  if (!currentPlanId) return;
+  const url = `${location.origin}/?plan=${currentPlanId}`;
   try {
-    const { sources } = await api('/sources');
-    const tbody = $('sources-table').querySelector('tbody');
-    tbody.innerHTML = '';
-    if (!sources.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="hint">ソースがありません。「＋ スクレイピング元を追加」から登録してください。</td></tr>';
-      return;
-    }
-    sources.forEach((s) => {
-      const driver = (s.config && s.config.driver) || s.kind || '—';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${esc(s.name)}</td>
-        <td>${esc(driver)}</td>
-        <td>${s.enabled ? '<span class="badge-on">有効</span>' : '<span class="badge-off">無効</span>'}</td>
-        <td>${esc(s.last_status || '—')}</td>
-        <td class="src-actions">
-          <button class="ghost small" data-action="toggle" data-id="${esc(s.id)}" data-enabled="${s.enabled ? 1 : 0}">${s.enabled ? '無効化' : '有効化'}</button>
-          <button class="ghost small danger" data-action="delete" data-id="${esc(s.id)}" data-name="${esc(s.name)}">削除</button>
-        </td>`;
-      tbody.appendChild(tr);
-    });
-  } catch (e) {
-    console.error(e);
+    await navigator.clipboard.writeText(url);
+    setStatus('プランのリンクをコピーしました 🔗 ' + url, 'ok');
+  } catch {
+    setStatus('共有リンク: ' + url, 'ok');
   }
 }
 
-async function addSource(ev) {
-  ev.preventDefault();
-  const btn = ev.submitter;
-  if (btn) btn.disabled = true;
-  setStatus('スクレイピング元を追加中...');
+async function loadSharedPlan(id) {
+  setStatus('保存されたプランを読み込み中…');
   try {
-    const body = {
-      driver: $('src-driver').value,
-      url: $('src-url').value.trim(),
-      prefecture: $('src-pref').value.trim() || undefined,
-      name: $('src-name').value.trim() || undefined,
-      category: $('src-cat').value.trim() || undefined,
-      enabled: true,
-    };
-    await api('/sources', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    $('source-form').reset();
-    await loadSources();
-    setStatus('追加しました。「スクレイピング実行」で取得できます。', 'ok');
+    const d = await api('/plan/' + encodeURIComponent(id));
+    selectedInterests.clear();
+    await loadCategories(d.request && d.request.interests);
+    fillForm(d.request);
+    currentPlanId = d.id;
+    renderPlan({ plan: d.result });
+    $('share-btn').classList.remove('hidden');
+    setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
   } catch (e) {
-    setStatus('追加に失敗: ' + e.message, 'err');
-  } finally {
-    if (btn) btn.disabled = false;
+    await loadCategories();
+    setStatus('共有プランが見つかりませんでした: ' + e.message, 'err');
   }
 }
 
-async function onSourceAction(ev) {
-  const btn = ev.target.closest('button[data-action]');
-  if (!btn) return;
-  const id = btn.dataset.id;
-  const action = btn.dataset.action;
-  btn.disabled = true;
-  try {
-    if (action === 'toggle') {
-      const enabled = btn.dataset.enabled === '1';
-      await api('/sources/' + encodeURIComponent(id), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !enabled }),
-      });
-    } else if (action === 'delete') {
-      if (!confirm(`「${btn.dataset.name}」を削除しますか？`)) {
-        btn.disabled = false;
-        return;
-      }
-      await api('/sources/' + encodeURIComponent(id), { method: 'DELETE' });
-    }
-    await loadSources();
-  } catch (e) {
-    setStatus('操作に失敗: ' + e.message, 'err');
-    btn.disabled = false;
-  }
-}
-
-// --- プラン生成 ---
+// --- plan ---
 async function submitPlan(ev) {
   ev.preventDefault();
-  const btn = ev.submitter;
-  if (btn) btn.disabled = true;
-  setStatus('プランを作成中...');
+  const btn = $('submit-btn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  const autoScrape = $('autoScrape').checked;
+  setStatus(autoScrape ? '情報を集めてプランを作成中…（初回は数十秒かかります）' : 'プランを作成中…');
   try {
     const body = {
       area: $('area').value.trim() || undefined,
@@ -145,7 +141,14 @@ async function submitPlan(ev) {
       interests: [...selectedInterests],
       budget: $('budget').value ? Number($('budget').value) : undefined,
       pace: $('pace').value,
-      engine: $('useAi').checked ? 'ai' : 'rule',
+      weather: $('weather').value,
+      companions: $('companions').value || undefined,
+      vibe: $('vibe').value || undefined,
+      origin: $('origin').value.trim() || undefined,
+      transport: $('transport').value || undefined,
+      keyword: $('keyword').value.trim() || undefined,
+      hotelFeatures: getHotelFeatures(),
+      autoScrape,
     };
     const data = await api('/plan', {
       method: 'POST',
@@ -153,11 +156,22 @@ async function submitPlan(ev) {
       body: JSON.stringify(body),
     });
     renderPlan(data);
-    setStatus(`完成（候補 ${data.candidateCount} 件 / エンジン: ${data.plan.engine}）`, 'ok');
+    currentPlanId = data.id;
+    if (currentPlanId) $('share-btn').classList.remove('hidden');
+    if (data.candidateCount === 0) {
+      setStatus(`条件に合う候補が見つかりませんでした。${discoverDiag(data.discovered)}`, 'err');
+    } else {
+      const extra = [];
+      if (data.discovered && data.discovered.total) extra.push(`自動収集 ${data.discovered.total}件`);
+      if (data.scrape && data.scrape.ran && data.scrape.total) extra.push(`登録ソース ${data.scrape.total}件`);
+      const suffix = extra.length ? ` ・ ${extra.join(' / ')}` : '';
+      setStatus(`プランが完成しました（候補 ${data.candidateCount}件${suffix}）`, 'ok');
+    }
   } catch (e) {
     setStatus('エラー: ' + e.message, 'err');
   } finally {
-    if (btn) btn.disabled = false;
+    btn.disabled = false;
+    btn.classList.remove('loading');
   }
 }
 
@@ -165,97 +179,159 @@ function renderPlan(data) {
   const plan = data.plan;
   $('result').classList.remove('hidden');
 
-  const cost = plan.totalEstimatedCost
-    ? `<span class="cost">概算費用: ¥${plan.totalEstimatedCost.toLocaleString()}</span>`
-    : '';
+  const theme = plan.theme ? `<div class="plan-theme">${esc(plan.theme)}</div>` : '';
+  const summaryText =
+    plan.summary && plan.summary !== plan.theme ? `<div class="summary-text">${esc(plan.summary)}</div>` : '';
   const highlights = (plan.highlights || []).length
     ? `<div class="highlights">${plan.highlights.map((h) => `<span class="tag">★ ${esc(h)}</span>`).join('')}</div>`
     : '';
-  $('plan-summary').innerHTML = `<div class="summary-box"><div>${esc(plan.summary)}</div>${cost}${highlights}</div>`;
+  const advice = (plan.advice || []).length
+    ? `<div class="advice"><div class="advice-h">🧭 楽しみ方のヒント</div><ul>${plan.advice
+        .map((a) => `<li>${esc(a)}</li>`)
+        .join('')}</ul></div>`
+    : '';
+
+  let html = `<div class="summary-box">${theme}${summaryText}${highlights}</div>`;
+  if (plan.travel) html += renderTravel(plan.travel);
+  if (plan.costBreakdown) html += renderCost(plan.costBreakdown);
+  if (plan.hotels && plan.hotels.length) html += renderHotels(plan.hotels);
+  html += advice;
+  $('plan-summary').innerHTML = html;
 
   const daysEl = $('plan-days');
   daysEl.innerHTML = '';
-  plan.days.forEach((day, i) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'day';
-    const dateLabel = formatDate(day.date, i);
-    const items = day.items.length
-      ? day.items.map(renderItem).join('')
-      : '<p class="hint">この日の候補が見つかりませんでした。条件をゆるめるか、データを追加してください。</p>';
-    wrap.innerHTML = `<div class="day-head">${dateLabel}</div>${items}`;
-    daysEl.appendChild(wrap);
-  });
+  plan.days.forEach((day, i) => daysEl.insertAdjacentHTML('beforeend', renderDay(day, i)));
 
-  $('result').scrollIntoView({ behavior: 'smooth' });
+  $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function renderItem(it) {
-  const time = it.time ? `<div class="time">${esc(it.time)}</div>` : '<div class="time">—</div>';
-  const cat = it.category ? `<span class="cat">${esc(it.category)}</span>` : '';
-  const loc = it.location ? `📍 ${esc(it.location)}` : '';
-  const price = it.price != null ? ` / ¥${Number(it.price).toLocaleString()}` : '';
-  const title = it.url
-    ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>`
-    : esc(it.title);
+const yen = (n) => '¥' + Number(n || 0).toLocaleString();
+
+function renderTravel(t) {
+  const bits = [];
+  if (t.distance) bits.push(`距離 ${esc(t.distance)}`);
+  if (t.duration) bits.push(`片道 ${esc(t.duration)}`);
+  if (t.costRoundTrip) bits.push(`往復 ${yen(t.costRoundTrip)}`);
+  const mode = t.mode ? `（${esc(t.mode)}）` : '';
+  return `<div class="info-card">
+    <div class="info-h">🚆 ${esc(t.from || '出発地')} → ${esc(t.to || '目的地')}${mode}</div>
+    ${bits.length ? `<div class="pills">${bits.map((b) => `<span class="pill">${b}</span>`).join('')}</div>` : ''}
+    ${t.note ? `<p class="info-note">${esc(t.note)}</p>` : ''}
+  </div>`;
+}
+
+function renderCost(c) {
+  const rows = [
+    [`ホテル${c.nights ? `（${c.nights}泊）` : ''}`, c.hotel],
+    ['食事', c.food],
+    ['観光・体験', c.activities],
+  ]
+    .map(([l, v]) => `<div class="cost-row"><span>${l}</span><span>${yen(v)}</span></div>`)
+    .join('');
+  const stay = `<div class="cost-row total"><span>滞在費合計</span><b>${yen(c.stayTotal)}</b></div>`;
+  const transport = c.transport
+    ? `<div class="cost-row"><span>交通（往復）</span><span>${yen(c.transport)}</span></div>`
+    : '';
+  const grand = `<div class="cost-row grand"><span>総額（滞在費＋交通）</span><b>${yen(c.grandTotal)}</b></div>`;
+  let budget = '';
+  if (c.budget != null) {
+    const diff = Math.abs(c.stayTotal - c.budget);
+    budget = c.withinBudget
+      ? `<div class="budget ok">✓ 予算内（滞在費 ${yen(c.stayTotal)} / 予算 ${yen(c.budget)}）</div>`
+      : `<div class="budget over">⚠ 予算オーバー +${yen(diff)}（滞在費 ${yen(c.stayTotal)} / 予算 ${yen(c.budget)}）</div>`;
+  }
+  return `<div class="info-card">
+    <div class="info-h">💰 費用の目安（1人）</div>
+    ${rows}${stay}${transport}${grand}${budget}
+    <p class="info-note">※AIによる概算です。実際の料金は各予約サイト等でご確認ください。</p>
+  </div>`;
+}
+
+function renderHotels(hotels) {
+  const list = hotels
+    .map((h) => {
+      const name = h.url
+        ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.name)}</a>`
+        : esc(h.name);
+      return `<div class="hotel">
+      <div class="hotel-top"><span class="hotel-name">${name}</span>${
+        h.nightlyPrice ? `<span class="hotel-price">${yen(h.nightlyPrice)} / 泊・人〜</span>` : ''
+      }</div>
+      ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
+      ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
+    </div>`;
+    })
+    .join('');
+  return `<div class="info-card">
+    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・予算内/安い順）</div>
+    ${list}
+    <p class="info-note">※価格は目安です。空室・料金・プランは予約ページでご確認ください。</p>
+  </div>`;
+}
+
+function renderDay(day, i) {
+  const d = new Date(day.date + 'T00:00:00');
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  const dayTheme = day.theme ? `<div class="day-theme">${esc(day.theme)}</div>` : '';
+  const items = day.items.length
+    ? day.items.map(renderItem).join('')
+    : '<div class="empty-day">この日の候補は見つかりませんでした。条件をゆるめてみてください。</div>';
   return `
-    <div class="item">
-      ${time}
-      <div class="body">
-        <div class="title">${title}</div>
-        <div class="meta">${cat}${loc}${price}</div>
+    <div class="day">
+      <div class="day-head">
+        <div class="day-num"><small>DAY</small>${i + 1}</div>
+        <div>
+          <div class="day-date">${d.getMonth() + 1}/${d.getDate()}<span>(${wd})</span></div>
+          ${dayTheme}
+        </div>
       </div>
+      <div class="items">${items}</div>
     </div>`;
 }
 
-// --- 補助操作 ---
-async function runDemo(ev) {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
-  setStatus('サンプルデータを投入中...');
-  try {
-    const data = await api('/demo', { method: 'POST' });
-    setStatus(`サンプル ${data.inserted} 件を投入しました。エリアに「箱根」と入れて作成してみてください。`, 'ok');
-  } catch (e) {
-    setStatus('エラー: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
+function renderItem(it) {
+  const time = it.time
+    ? `<span class="item-time">${esc(it.time)}</span>`
+    : `<span class="item-time tba">時間自由</span>`;
+
+  const meta = [];
+  if (it.category) meta.push(`<span class="badge">${catEmoji(it.category)} ${esc(it.category)}</span>`);
+  if (it.location) meta.push(`<span>📍 ${esc(it.location)}</span>`);
+  const cost = it.price != null ? it.price : it.estCost;
+  if (cost != null) meta.push(`<span class="item-price">${cost === 0 ? '無料' : '目安 ' + yen(cost)}</span>`);
+
+  const detail = [];
+  if (it.why) detail.push(`<p class="why"><b>💡 おすすめ</b>${esc(it.why)}</p>`);
+  if (it.tips) detail.push(`<p class="tips"><b>🎯 楽しみ方</b>${esc(it.tips)}</p>`);
+  if (it.access) detail.push(`<p class="access"><b>🚃 行き方</b>${esc(it.access)}</p>`);
+  const sub = [];
+  if (it.duration) sub.push(`⏱ 滞在目安 ${esc(it.duration)}`);
+  if (it.alt) sub.push(`🔄 ${esc(it.alt)}`);
+
+  // 地図・公式サイト・情報元へのリンク（名称から確実に生成）
+  const q = encodeURIComponent(`${it.title} ${it.location || ''}`.trim());
+  const links = [
+    `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>`,
+    `<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式サイト</a>`,
+  ];
+  if (it.url) links.push(`<a href="${esc(it.url)}" target="_blank" rel="noopener">📰 情報元</a>`);
+
+  return `
+    <div class="item">
+      <div class="item-top">${time}<span class="item-title">${esc(it.title)}</span></div>
+      ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
+      ${detail.join('')}
+      ${sub.length ? `<div class="item-sub">${sub.join('　·　')}</div>` : ''}
+      <div class="item-links">${links.join('')}</div>
+    </div>`;
 }
 
-async function runScrape(ev) {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
-  setStatus('スクレイピングを実行中...（有効なソースのみ）');
-  try {
-    const summary = await api('/scrape', { method: 'POST' });
-    const results = summary.results || [];
-    const ok = results.filter((r) => r.status === 'ok').length;
-    const skipped = results.filter((r) => r.status === 'skipped');
-    const failed = results.filter((r) => r.status === 'error');
-    await loadSources();
-
-    if (results.length === 0) {
-      setStatus('有効なソースがありません。sources テーブルで対象を有効化してください（README参照）。', 'err');
-    } else if (failed.length) {
-      const detail = failed.map((r) => `${r.source}: ${r.message}`).join(' / ');
-      setStatus(`一部失敗（取得 ${summary.total} 件 / 成功 ${ok}）。失敗: ${detail}`, 'err');
-    } else if (ok === 0 && skipped.length) {
-      const detail = skipped.map((r) => `${r.source}: ${r.message}`).join(' / ');
-      setStatus(`実行対象なし（スキップ）。${detail}`, 'err');
-    } else {
-      setStatus(`完了: ${summary.total} 件取得 / 成功 ${ok} ソース。`, 'ok');
-    }
-  } catch (e) {
-    setStatus('エラー: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-function formatDate(iso, i) {
-  const d = new Date(iso + 'T00:00:00');
-  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
-  return `Day ${i + 1} ・ ${d.getMonth() + 1}/${d.getDate()}(${wd})`;
+function discoverDiag(discovered) {
+  if (!discovered) return '';
+  const s = discovered.stats;
+  const stat = s ? `[検索候補 ${s.candidates} / 取得 ${s.fetched} / エンジン ${s.engine || 'なし'}]` : '';
+  const note = discovered.note ? ' ' + discovered.note : '';
+  return `${stat}${note}`;
 }
 
 function esc(s) {
@@ -265,14 +341,16 @@ function esc(s) {
 }
 
 // --- bootstrap ---
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   initDates();
-  loadCategories();
-  loadSources();
   $('plan-form').addEventListener('submit', submitPlan);
-  $('demo-btn').addEventListener('click', runDemo);
-  $('scrape-btn').addEventListener('click', runScrape);
-  $('refresh-sources').addEventListener('click', loadSources);
-  $('source-form').addEventListener('submit', addSource);
-  $('sources-table').querySelector('tbody').addEventListener('click', onSourceAction);
+  $('share-btn').addEventListener('click', sharePlan);
+  $('startDate').addEventListener('change', () => {
+    const s = $('startDate').value;
+    if (s) $('endDate').value = addDays(s, 1);
+  });
+
+  const sharedId = new URLSearchParams(location.search).get('plan');
+  if (sharedId) await loadSharedPlan(sharedId);
+  else await loadCategories();
 });

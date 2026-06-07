@@ -13,6 +13,8 @@ interface GetOptions {
   cacheTtl?: number;
   /** robots.txt チェックをスキップ（robots.txt 自体の取得用）。 */
   skipRobots?: boolean;
+  /** 追加のリクエストヘッダ（APIキー等）。 */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -30,7 +32,8 @@ export class HttpClient {
 
   constructor(opts: { userAgent?: string; minIntervalMs?: number } = {}) {
     this.userAgent = opts.userAgent ?? 'TripPlannerBot/0.1 (personal use)';
-    this.minIntervalMs = opts.minIntervalMs ?? 1200;
+    // 同一ホストへの最低アクセス間隔（既定3秒）。相手サーバーへの配慮。
+    this.minIntervalMs = opts.minIntervalMs ?? 3000;
   }
 
   async getText(url: string, opts: GetOptions = {}): Promise<string> {
@@ -53,6 +56,7 @@ export class HttpClient {
         'User-Agent': this.userAgent,
         Accept: opts.accept ?? 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
         'Accept-Language': 'ja,en;q=0.8',
+        ...(opts.headers ?? {}),
       },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);

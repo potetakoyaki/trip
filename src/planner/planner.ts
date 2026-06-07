@@ -1,19 +1,28 @@
-import type { Env, EventRecord, Plan, PlanRequest } from '../types';
+import type { Env, EventRecord, HotelOption, Plan, PlanRequest } from '../types';
 import { generateRulePlan } from './rule-based';
 import { generateAiPlan } from './ai';
 
+export interface PlanOptions {
+  /** 実在ホテル（楽天等）。あれば AI 概算より優先する。 */
+  hotels?: HotelOption[];
+}
+
 /**
  * プラン生成のエントリポイント。
- * engine='ai' かつ Workers AI が利用可能なときだけ AI を使い、
- * それ以外（標準）は完全無料・キー不要のルールベースで生成する。
+ * Workers AI が使えるなら、理由・楽しみ方つきの提案プランを既定で生成する
+ * （engine='rule' が明示されたときだけルールベース）。AI失敗時も内部で
+ * ルールベースにフォールバックする。
  */
 export async function generatePlan(
   env: Env,
   events: EventRecord[],
   req: PlanRequest,
+  opts: PlanOptions = {},
 ): Promise<Plan> {
-  if (req.engine === 'ai') {
-    return generateAiPlan(env, events, req);
+  if (req.engine !== 'rule' && env.AI) {
+    return generateAiPlan(env, events, req, opts);
   }
-  return generateRulePlan(events, req);
+  const plan = generateRulePlan(events, req);
+  if (opts.hotels?.length) plan.hotels = opts.hotels;
+  return plan;
 }

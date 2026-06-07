@@ -1,10 +1,21 @@
 # このファイルを .dev.vars にコピーして、ローカル開発用の値を入れる。
 # .dev.vars は .gitignore 済みなのでコミットされない。
 
-# 楽天ウェブサービスのアプリID（楽天トラベルAPIを使う場合）
-# https://webservice.rakuten.co.jp/ で無料登録
+# 楽天ウェブサービス 新API（2026〜）の認証情報（楽天トラベルAPIを使う場合）
+# https://webservice.rakuten.co.jp/ で無料登録。アプリ詳細画面の値を使う。
+# RAKUTEN_APP_ID = Application ID（UUID形式）
+# RAKUTEN_ACCESS_KEY = Access Key（pk_ で始まる）
 RAKUTEN_APP_ID=
+RAKUTEN_ACCESS_KEY=
 
 # connpass API キー（connpass の公式APIを使う場合）
 # https://connpass.com/about/api/ から申請
 CONNPASS_API_KEY=
+
+# Brave Search API キー（自動収集の検索を安定させたい場合・任意）
+# https://brave.com/search/api/ で登録
+BRAVE_API_KEY=
+
+# Jina API キー（任意・カード不要の無料キーで上限アップ）
+# https://jina.ai/ のトップに無料キーが表示される。未設定でも自動収集は動作する。
+JINA_API_KEY=

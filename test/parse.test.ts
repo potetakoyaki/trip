@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { parseRss } from '../src/scrape/rss';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 import { robotsAllows } from '../src/scrape/robots';
+import { extractReadableText } from '../src/scrape/readable';
+import { parseSpotArray, readSpots } from '../src/scrape/ai-extract';
+import { extractDdgLinks, extractBingLinks } from '../src/scrape/autosource';
 
 describe('parseRss', () => {
   it('RSS の item を抽出する', () => {
@@ -114,5 +117,99 @@ describe('robotsAllows', () => {
   it('自分の UA 向けルールを優先する', () => {
     const txt = 'User-agent: tripplannerbot\nDisallow: /\n\nUser-agent: *\nDisallow:';
     expect(robotsAllows(txt, '/x', ua)).toBe(false);
+  });
+});
+
+describe('extractReadableText（ブログ本文抽出）', () => {
+  it('script/style/タグを除去して本文を取り出す', () => {
+    const html = `
+      <html><head><style>.a{color:red}</style><script>var x=1;</script></head>
+      <body>
+        <h1>箱根温泉の旅</h1>
+        <p>大涌谷で黒たまごを食べました。</p>
+        <p>芦ノ湖の遊覧船もおすすめ。</p>
+      </body></html>`;
+    const text = extractReadableText(html);
+    expect(text).toContain('箱根温泉の旅');
+    expect(text).toContain('黒たまご');
+    expect(text).not.toContain('color:red');
+    expect(text).not.toContain('var x');
+    expect(text).not.toContain('<p>');
+  });
+
+  it('maxLen で切り詰める', () => {
+    const html = '<p>' + 'あ'.repeat(100) + '</p>';
+    expect(extractReadableText(html, 20).length).toBeLessThanOrEqual(20);
+  });
+});
+
+describe('parseSpotArray（AI応答からJSON配列を抽出）', () => {
+  it('前後に説明文があってもJSON配列を取り出す', () => {
+    const res = 'はい、以下が抽出結果です:\n[{"title":"大涌谷","category":"自然"},{"title":"芦ノ湖","category":"自然"}] 以上です。';
+    const spots = parseSpotArray(res);
+    expect(spots).toHaveLength(2);
+    expect(spots[0].title).toBe('大涌谷');
+  });
+
+  it('配列が無ければ空配列', () => {
+    expect(parseSpotArray('抽出できませんでした')).toEqual([]);
+  });
+
+  it('壊れたJSONは空配列', () => {
+    expect(parseSpotArray('[{"title": broken')).toEqual([]);
+  });
+});
+
+describe('readSpots（AI応答の各形式に対応）', () => {
+  it('JSONモードのオブジェクト応答 {spots:[...]} を読む', () => {
+    const res = { response: { spots: [{ title: '大涌谷', category: '自然' }, { title: '芦ノ湖' }] } };
+    expect(readSpots(res)).toHaveLength(2);
+  });
+
+  it('response が配列のオブジェクト文字列でも読む', () => {
+    const res = { response: '{"spots":[{"title":"箱根神社"}]}' };
+    expect(readSpots(res)).toHaveLength(1);
+  });
+
+  it('response が素の配列文字列でも読む', () => {
+    const res = { response: '[{"title":"彫刻の森美術館","category":"アート"}]' };
+    expect(readSpots(res)[0].title).toBe('彫刻の森美術館');
+  });
+
+  it('title が無い要素は除外', () => {
+    const res = { response: { spots: [{ category: '自然' }, { title: '大涌谷' }] } };
+    expect(readSpots(res)).toHaveLength(1);
+  });
+});
+
+describe('extractDdgLinks（検索結果から実URL抽出）', () => {
+  it('uddg リダイレクトから実URLを復元し重複を除く', () => {
+    const enc = encodeURIComponent('https://www.jalan.net/kankou/box.html');
+    const enc2 = encodeURIComponent('https://travel.blog.example.jp/hakone');
+    const html = `
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=${enc}&rut=x">じゃらん 箱根</a>
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=${enc2}">箱根ブログ</a>
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=${enc}">じゃらん（重複）</a>`;
+    const links = extractDdgLinks(html);
+    expect(links).toContain('https://www.jalan.net/kankou/box.html');
+    expect(links).toContain('https://travel.blog.example.jp/hakone');
+    expect(links).toHaveLength(2); // 重複は除外
+  });
+
+  it('結果が無ければ空配列', () => {
+    expect(extractDdgLinks('<html>no results</html>')).toEqual([]);
+  });
+});
+
+describe('extractBingLinks（Bing結果から実URL抽出）', () => {
+  it('h2>a の結果URLを抽出し、bing自身は除外', () => {
+    const html = `
+      <li class="b_algo"><h2><a href="https://www.jalan.net/kankou/hakone/">箱根観光</a></h2></li>
+      <li class="b_algo"><h2><a href="https://travel.blog.example.jp/hakone?a=1&amp;b=2">箱根ブログ</a></h2></li>
+      <h2><a href="https://www.bing.com/aclick?u=ad">広告</a></h2>`;
+    const links = extractBingLinks(html);
+    expect(links).toContain('https://www.jalan.net/kankou/hakone/');
+    expect(links).toContain('https://travel.blog.example.jp/hakone?a=1&b=2');
+    expect(links.some((u) => u.includes('bing.com'))).toBe(false);
   });
 });

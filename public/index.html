@@ -3,121 +3,146 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>旅行プランメーカー</title>
+    <title>Trip Planner — 旅行プランメーカー</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header>
-      <h1>🧳 旅行プランメーカー</h1>
-      <p class="sub">イベント・観光情報を集めて、最適な日程プランを自動作成（個人用）</p>
+    <header class="hero">
+      <div class="hero-inner">
+        <div class="hero-badge">🧳 Trip Planner</div>
+        <h1>行き先と日付だけで、<br />旅程が組み上がる。</h1>
+        <p>エリアと日付を入れて作成するだけ。AIが大手サイト・ブログから情報を集めて、最適な日程プランを自動で作ります。</p>
+      </div>
     </header>
 
     <main>
-      <section class="card">
-        <h2>プランを作る</h2>
+      <section class="card form-card">
         <form id="plan-form">
-          <div class="row">
-            <label>エリア
-              <input type="text" id="area" placeholder="例: 箱根 / 京都 / 神奈川県" />
-            </label>
+          <div class="field">
+            <label for="area">エリア・行き先</label>
+            <input type="text" id="area" placeholder="例: 箱根 / 京都 / 神奈川県" autocomplete="off" />
           </div>
-          <div class="row two">
-            <label>開始日
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="origin">出発地点</label>
+              <input type="text" id="origin" placeholder="例: 新宿 / 東京駅 / 名古屋" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="transport">移動手段</label>
+              <select id="transport">
+                <option value="">指定なし</option>
+                <option value="電車">電車</option>
+                <option value="新幹線">新幹線</option>
+                <option value="車">車</option>
+                <option value="飛行機">飛行機</option>
+                <option value="高速バス">高速バス</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="startDate">開始日</label>
               <input type="date" id="startDate" required />
-            </label>
-            <label>終了日
+            </div>
+            <div class="field">
+              <label for="endDate">終了日</label>
               <input type="date" id="endDate" required />
-            </label>
+            </div>
           </div>
-          <div class="row">
-            <span class="label">興味（複数選択可）</span>
+
+          <div class="field">
+            <label>興味（複数選択可）</label>
             <div id="interests" class="chips"></div>
           </div>
-          <div class="row two">
-            <label>予算の目安（円 / 1人）
+
+          <div class="field">
+            <label for="keyword">キーワード検索（やりたいこと・任意）</label>
+            <input type="text" id="keyword" placeholder="例: 花火 / 紅葉 / 美術館 / 海鮮" autocomplete="off" />
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="budget">予算の目安（円 / 1人）</label>
               <input type="number" id="budget" min="0" step="1000" placeholder="例: 20000" />
-            </label>
-            <label>ペース
+            </div>
+            <div class="field">
+              <label for="pace">ペース</label>
               <select id="pace">
                 <option value="relaxed">ゆったり（1日2件）</option>
                 <option value="normal" selected>普通（1日3件）</option>
                 <option value="packed">詰め込み（1日4件）</option>
               </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>ホテルの希望（任意）</label>
+            <div class="checks">
+              <label class="check"><input type="checkbox" class="hotel-feat" value="温泉" /> 温泉</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="露天風呂" /> 露天風呂</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="夕食付き" /> 夕食付き</label>
+              <label class="check"><input type="checkbox" class="hotel-feat" value="リゾート" /> リゾート</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>条件で提案を変える（お好みで）</label>
+            <div class="grid-3">
+              <select id="weather" aria-label="天気">
+                <option value="any">天気: 指定なし</option>
+                <option value="sunny">天気: 晴れ ☀️</option>
+                <option value="rainy">天気: 雨 ☔</option>
+              </select>
+              <select id="companions" aria-label="同行者">
+                <option value="">同行者: 指定なし</option>
+                <option value="ひとり">同行者: ひとり</option>
+                <option value="カップル">同行者: カップル</option>
+                <option value="家族">同行者: 家族</option>
+                <option value="友人">同行者: 友人</option>
+              </select>
+              <select id="vibe" aria-label="テーマ">
+                <option value="">テーマ: おまかせ</option>
+                <option value="定番">テーマ: 定番</option>
+                <option value="穴場">テーマ: 穴場</option>
+                <option value="グルメ重視">テーマ: グルメ重視</option>
+                <option value="のんびり">テーマ: のんびり</option>
+                <option value="アクティブ">テーマ: アクティブ</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="options">
+            <label class="switch">
+              <input type="checkbox" id="autoScrape" checked />
+              <span>作成時に最新情報を自動収集する</span>
             </label>
           </div>
-          <div class="row">
-            <label class="inline">
-              <input type="checkbox" id="useAi" /> Workers AI でプラン生成（利用可能な場合）
-            </label>
-          </div>
-          <div class="actions">
-            <button type="submit" class="primary">プランを作成</button>
-            <button type="button" id="demo-btn" class="ghost">サンプルデータ投入</button>
-            <button type="button" id="scrape-btn" class="ghost">スクレイピング実行</button>
-          </div>
+
+          <button type="submit" class="btn-primary" id="submit-btn">
+            <span class="btn-label">プランを作成する</span>
+          </button>
+
+          <p class="hint">
+            💡 登録は不要です。エリアを入れて作成すると、アプリが自動で情報を集めてプラン化します（初回は数十秒かかることがあります）。
+          </p>
         </form>
         <p id="status" class="status"></p>
       </section>
 
-      <section id="result" class="card hidden">
-        <h2>あなたの旅行プラン</h2>
+      <section id="result" class="card result-card hidden">
+        <div class="result-head">
+          <h2 class="section-title">あなたの旅行プラン</h2>
+          <button type="button" id="share-btn" class="btn-ghost hidden">🔗 リンクをコピー</button>
+        </div>
         <div id="plan-summary"></div>
-        <div id="plan-days"></div>
-      </section>
-
-      <section id="sources-section" class="card">
-        <h2>データソース（スクレイピング元）</h2>
-
-        <details class="add-source">
-          <summary>＋ スクレイピング元を追加</summary>
-          <form id="source-form">
-            <div class="row two">
-              <label>種類
-                <select id="src-driver">
-                  <option value="rss">RSS / Atom フィード</option>
-                  <option value="jsonld">イベントページ（JSON-LD自動抽出）</option>
-                </select>
-              </label>
-              <label>都道府県（任意）
-                <input type="text" id="src-pref" placeholder="例: 長野県" />
-              </label>
-            </div>
-            <div class="row">
-              <label>URL
-                <input type="text" id="src-url" placeholder="https://.../feed.xml もしくは イベント一覧ページのURL" />
-              </label>
-            </div>
-            <div class="row two">
-              <label>表示名（任意）
-                <input type="text" id="src-name" placeholder="例: 長野県観光協会RSS" />
-              </label>
-              <label>カテゴリ（任意・RSS用）
-                <input type="text" id="src-cat" placeholder="例: 観光" />
-              </label>
-            </div>
-            <div class="actions">
-              <button type="submit" class="primary">追加して有効化</button>
-            </div>
-          </form>
-          <p class="hint">
-            ⚠️ 追加先サイトの<strong>利用規約・robots.txt を必ず確認</strong>してください。取得は
-            robots尊重・低頻度・キャッシュ付きで行われますが、規約でスクレイピングを禁じているサイト
-            （大手予約サイト等）は避けてください。可能なら公式API・RSS・JSON-LD公開ページを選ぶのが安全です。
-          </p>
-        </details>
-
-        <button type="button" id="refresh-sources" class="ghost small">更新</button>
-        <table id="sources-table">
-          <thead>
-            <tr><th>名前</th><th>種類</th><th>有効</th><th>状態</th><th>操作</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div id="plan-days" class="timeline"></div>
       </section>
     </main>
 
     <footer>
-      <p>Cloudflare Workers + Hono + D1 / 個人利用向け</p>
+      <p>Powered by Cloudflare Workers · Hono · D1 · Workers AI</p>
     </footer>
 
     <script src="/app.js"></script>
