@@ -158,6 +158,45 @@ function validateForm() {
   return true;
 }
 
+async function deepCollect() {
+  const area = $('area').value.trim();
+  if (!area) {
+    setStatus('エリア・行き先を入力してください。', 'err');
+    $('area').focus();
+    return;
+  }
+  const btn = $('collect-btn');
+  const main = $('submit-btn');
+  btn.disabled = true;
+  main.disabled = true;
+  const keyword = $('keyword').value.trim() || undefined;
+  const interests = [...selectedInterests];
+  try {
+    let round = 1;
+    let total = 0;
+    let totalRounds = null;
+    const HARD_CAP = 12;
+    while (round <= HARD_CAP) {
+      setStatus(`じっくり収集中… ラウンド ${round}${totalRounds ? '/' + totalRounds : ''}（合計 ${total} 件）`, '');
+      const r = await api('/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ area, keyword, interests, round }),
+      });
+      totalRounds = r.totalRounds || totalRounds;
+      total = r.total ?? total;
+      if (!r.hasMore) break;
+      round++;
+    }
+    setStatus(`収集完了（${esc(area)}・合計 ${total} 件）。「プランを作成する」で使えます。`, 'ok');
+  } catch (e) {
+    setStatus('収集に失敗: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    main.disabled = false;
+  }
+}
+
 async function submitPlan(ev) {
   ev.preventDefault();
   if (!validateForm()) return;
@@ -400,6 +439,7 @@ function esc(s) {
 window.addEventListener('DOMContentLoaded', async () => {
   initDates();
   $('plan-form').addEventListener('submit', submitPlan);
+  $('collect-btn').addEventListener('click', deepCollect);
   $('share-btn').addEventListener('click', sharePlan);
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;

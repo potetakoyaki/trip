@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
-import { discoverAndScrape } from '../scrape/autosource';
+import { discoverAndScrape, roundQueries } from '../scrape/autosource';
 import { fetchRakutenHotels, rakutenHotelSearch } from '../scrape/hotels';
 import {
   createSource,
@@ -210,6 +210,32 @@ api.post('/scrape', async (c) => {
     }
   }
   return c.json({ ...summary, discovered });
+});
+
+// じっくり収集: 1ラウンド分だけ収集して蓄積する（無料のサブリクエスト上限内）。
+// クライアントが round=1,2,... と繰り返し呼んで段階的に貯める。
+api.post('/collect', async (c) => {
+  const raw = await c.req.json<any>().catch(() => null);
+  const area = str(raw?.area, 80);
+  if (!area) return c.json({ error: 'エリアが必要です' }, 400);
+  const round = Math.max(1, Math.min(20, Number(raw?.round) || 1));
+  const keyword = str(raw?.keyword, 80);
+  const interests = strArr(raw?.interests);
+
+  const { queries, totalRounds } = roundQueries(area, round, keyword);
+  let added = 0;
+  let engine: string | null = null;
+  let note: string | undefined;
+  try {
+    const r = await discoverAndScrape(c.env, { area, interests, queries, maxPages: 8 });
+    added = r.total;
+    engine = r.stats.engine;
+    note = r.note;
+  } catch (err) {
+    note = err instanceof Error ? err.message : String(err);
+  }
+  const total = (await searchEvents(c.env.DB, { area, limit: 500 })).length;
+  return c.json({ round, totalRounds, hasMore: round < totalRounds, added, total, engine, note });
 });
 
 // 動作確認用のサンプルデータ投入。

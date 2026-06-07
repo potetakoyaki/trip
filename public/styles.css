@@ -300,6 +300,27 @@ select:focus {
   }
 }
 
+.btn-secondary {
+  width: 100%;
+  margin-top: 10px;
+  border: 1.5px solid var(--brand);
+  background: #fff;
+  color: var(--brand-ink);
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.btn-secondary:hover {
+  background: #f6f8ff;
+}
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .hint {
   font-size: 0.82rem;
   color: var(--muted);

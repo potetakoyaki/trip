@@ -26,7 +26,7 @@ const BROWSER_UA =
  */
 export async function discoverAndScrape(
   env: Env,
-  opts: { area: string; interests?: string[]; keyword?: string },
+  opts: { area: string; interests?: string[]; keyword?: string; queries?: string[]; maxPages?: number },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
   const empty: DiscoverResult = { total: 0, docs: [], stats: { candidates: 0, fetched: 0, engine: null } };
@@ -36,7 +36,8 @@ export async function discoverAndScrape(
   // 同サービス（Jina/検索）への連続呼び出しを少し速める。対象サイト各ホストは
   // 1回ずつなのでレート制限の実害はほぼ無い。
   const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 1200 });
-  const queries = buildQueries(area, opts.interests, opts.keyword);
+  const queries = opts.queries?.length ? opts.queries : buildQueries(area, opts.interests, opts.keyword);
+  const maxPages = opts.maxPages ?? MAX_PAGES;
 
   const docs: { source: string; url: string; text: string }[] = [];
   let engine: string | null = null;
@@ -45,12 +46,12 @@ export async function discoverAndScrape(
   // 1) Jina 検索（検索＋本文取得を一度に。キー不要・サーバーIPで動作）
   //    クエリ（観光/グルメ/モデルコース）ごとに上位2件ずつ取り、偏りを防ぐ。
   for (const q of queries) {
-    if (docs.length >= MAX_PAGES) break;
+    if (docs.length >= maxPages) break;
     const results = await jinaSearch(http, env, q);
     if (results.length) {
       engine = 'jina';
       candidates += results.length;
-      pushDocs(docs, results.slice(0, 2));
+      pushDocs(docs, results.slice(0, 2), maxPages);
     }
   }
 
@@ -74,7 +75,7 @@ export async function discoverAndScrape(
     candidates = urls.length;
     const seenHost = new Set<string>();
     for (const url of urls) {
-      if (docs.length >= MAX_PAGES) break;
+      if (docs.length >= maxPages) break;
       const h = hostOf(url);
       if (!h || isExcludedHost(h) || seenHost.has(h)) continue;
       seenHost.add(h);
@@ -225,9 +226,10 @@ async function searchWeb(
 function pushDocs(
   docs: { source: string; url: string; text: string }[],
   results: { url: string; text: string }[],
+  limit: number,
 ): void {
   for (const r of results) {
-    if (docs.length >= MAX_PAGES) break;
+    if (docs.length >= limit) break;
     const h = hostOf(r.url);
     if (!h || isExcludedHost(h)) continue;
     if (docs.some((d) => hostOf(d.url) === h)) continue; // 同一ホストは1件まで
@@ -284,6 +286,41 @@ export function extractBingLinks(html: string): string[] {
     }
   }
   return out;
+}
+
+// 「じっくり収集」用：多様な切り口の検索テンプレート。ラウンドごとに別の角度で集める。
+const DEEP_TEMPLATES = [
+  '観光 おすすめ スポット',
+  '人気 観光地 名所 ランキング',
+  'グルメ ランチ 名物 おすすめ',
+  'カフェ スイーツ おしゃれ',
+  'イベント 体験 アクティビティ レジャー',
+  '旅行 ブログ モデルコース 巡り',
+  '神社 寺 歴史 名所',
+  '自然 絶景 公園 海 山',
+  '穴場 隠れ家 ローカル おすすめ',
+  '子供 家族 遊び場',
+  'デート カップル おすすめ',
+  '夜景 夕日 ビュースポット',
+  'お土産 ショッピング 市場',
+  '温泉 日帰り 銭湯',
+  '美術館 アート 博物館',
+  'インスタ 映え フォトスポット',
+];
+const DEEP_PER_ROUND = 3;
+
+/** ラウンドごとの検索クエリ群と総ラウンド数を返す（じっくり収集用）。 */
+export function roundQueries(
+  area: string,
+  round: number,
+  keyword?: string,
+): { queries: string[]; totalRounds: number } {
+  const totalRounds = Math.ceil(DEEP_TEMPLATES.length / DEEP_PER_ROUND);
+  const start = (Math.max(1, round) - 1) * DEEP_PER_ROUND;
+  const slice = DEEP_TEMPLATES.slice(start, start + DEEP_PER_ROUND);
+  const queries = slice.map((t) => `${area} ${t}`);
+  if (round === 1 && keyword && keyword.trim()) queries.unshift(`${area} ${keyword.trim()}`);
+  return { queries, totalRounds };
 }
 
 function buildQueries(area: string, interests?: string[], keyword?: string): string[] {
