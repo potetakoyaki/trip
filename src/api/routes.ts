@@ -4,6 +4,7 @@ import { runScrape } from '../scrape/runner';
 import {
   createSource,
   deleteSource,
+  getLastScrapeAt,
   getPlan,
   getSources,
   insertDemoEvents,
@@ -121,6 +122,24 @@ api.post('/plan', async (c) => {
     return c.json({ error: 'startDate と endDate は必須です' }, 400);
   }
 
+  // プラン作成時に最新情報を自動取得する。ただし相手サイトへの配慮として、
+  // 直近 FRESH_MS 以内に取得済みならスキップ（HTTPキャッシュも併用される）。
+  // スクレイピングが失敗してもプラン作成は止めない（runScrape は例外を投げない）。
+  const FRESH_MS = 10 * 60 * 1000;
+  let scrape: { ran: boolean; total?: number; results?: unknown; lastRunAt?: string | null } = {
+    ran: false,
+  };
+  if (body.autoScrape !== false) {
+    const last = await getLastScrapeAt(c.env.DB);
+    const stale = !last || Date.now() - Date.parse(last) > FRESH_MS;
+    if (stale) {
+      const summary = await runScrape(c.env);
+      scrape = { ran: true, total: summary.total, results: summary.results };
+    } else {
+      scrape = { ran: false, lastRunAt: last };
+    }
+  }
+
   // 候補イベントを取得（日付不明のスポット/宿も含まれる）
   const events = await searchEvents(c.env.DB, {
     area: body.area,
@@ -139,7 +158,7 @@ api.post('/plan', async (c) => {
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   await savePlan(c.env.DB, id, createdAt, body, plan);
-  return c.json({ id, createdAt, candidateCount: events.length, plan });
+  return c.json({ id, createdAt, candidateCount: events.length, plan, scrape });
 });
 
 api.get('/plan/:id', async (c) => {

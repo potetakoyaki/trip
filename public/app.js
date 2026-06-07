@@ -136,7 +136,8 @@ async function submitPlan(ev) {
   ev.preventDefault();
   const btn = ev.submitter;
   if (btn) btn.disabled = true;
-  setStatus('プランを作成中...');
+  const autoScrape = $('autoScrape').checked;
+  setStatus(autoScrape ? '最新情報を取得してプランを作成中...' : 'プランを作成中...');
   try {
     const body = {
       area: $('area').value.trim() || undefined,
@@ -146,6 +147,7 @@ async function submitPlan(ev) {
       budget: $('budget').value ? Number($('budget').value) : undefined,
       pace: $('pace').value,
       engine: $('useAi').checked ? 'ai' : 'rule',
+      autoScrape,
     };
     const data = await api('/plan', {
       method: 'POST',
@@ -153,7 +155,11 @@ async function submitPlan(ev) {
       body: JSON.stringify(body),
     });
     renderPlan(data);
-    setStatus(`完成（候補 ${data.candidateCount} 件 / エンジン: ${data.plan.engine}）`, 'ok');
+    let extra = '';
+    if (data.scrape && data.scrape.ran) extra = ` / 最新取得 ${data.scrape.total} 件`;
+    else if (data.scrape && data.scrape.lastRunAt) extra = ' / 取得は最近済みのためスキップ';
+    setStatus(`完成（候補 ${data.candidateCount} 件 / エンジン: ${data.plan.engine}${extra}）`, 'ok');
+    if (autoScrape) loadSources();
   } catch (e) {
     setStatus('エラー: ' + e.message, 'err');
   } finally {

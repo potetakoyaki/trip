@@ -73,6 +73,8 @@ export interface PlanRequest {
   budget?: number; // 1人あたり総額の目安（円）
   pace?: 'relaxed' | 'normal' | 'packed';
   engine?: 'rule' | 'ai';
+  /** プラン作成時に最新情報を自動取得するか（既定 true）。 */
+  autoScrape?: boolean;
 }
 
 export interface PlanItem {
