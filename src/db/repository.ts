@@ -158,6 +158,15 @@ export async function updateJobProgress(
     .run();
 }
 
+/** じっくり収集をキャンセル（保留中のみ）。以降のラウンドは実行されない。 */
+export async function cancelCollectJob(db: D1Database, area: string, now: string): Promise<boolean> {
+  const res = await db
+    .prepare("UPDATE collect_jobs SET status='cancelled', updated_at=? WHERE area=? AND status='pending'")
+    .bind(now, area)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
 // 収集済みの (エリア, キーワード) 条件を記録し、差分収集の判定に使う。
 const ENSURE_COVERED_SQL = `CREATE TABLE IF NOT EXISTS collect_covered (
   area TEXT NOT NULL,
@@ -361,6 +370,15 @@ export async function updatePlanJob(
     .prepare('UPDATE plan_jobs SET status=?, plan_id=?, error=?, updated_at=? WHERE id=?')
     .bind(p.status, p.planId ?? null, p.error ?? null, p.now, id)
     .run();
+}
+
+/** プラン作成ジョブをキャンセル（保留中のみ）。 */
+export async function cancelPlanJob(db: D1Database, id: string, now: string): Promise<boolean> {
+  const res = await db
+    .prepare("UPDATE plan_jobs SET status='cancelled', updated_at=? WHERE id=? AND status='pending'")
+    .bind(now, id)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */

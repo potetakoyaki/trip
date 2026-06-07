@@ -31,6 +31,17 @@ export async function processOneRound(env: Env, area: string): Promise<void> {
 
   const collected = (await searchEvents(env.DB, { area, limit: 500 })).length;
   const nextRound = job.round + 1;
+  // ラウンド実行中にキャンセルされていたら、保留に戻さず終了する。
+  const fresh = await getJob(env.DB, area);
+  if (fresh && fresh.status === 'cancelled') {
+    await updateJobProgress(env.DB, area, {
+      round: job.round,
+      status: 'cancelled',
+      collected,
+      now: new Date().toISOString(),
+    });
+    return;
+  }
   const status = nextRound > totalRounds ? 'done' : 'pending';
   await updateJobProgress(env.DB, area, { round: nextRound, status, collected, now: new Date().toISOString() });
 }
@@ -53,7 +64,7 @@ function safeParse(s: string): string[] | undefined {
 
 // ---- プラン作成ジョブ ----
 import { createPlan } from '../planner/create-plan';
-import { ensurePlanJobs, getPlanJob, takePendingPlanJob, updatePlanJob } from '../db/repository';
+import { ensurePlanJobs, getPlanJob, hidePlan, takePendingPlanJob, updatePlanJob } from '../db/repository';
 
 /** 1件のプラン作成ジョブを実行する。 */
 export async function runPlanJob(env: Env, id: string): Promise<void> {
@@ -63,6 +74,12 @@ export async function runPlanJob(env: Env, id: string): Promise<void> {
   try {
     const req = JSON.parse(job.request);
     const r = await createPlan(env, req, job.origin ?? undefined);
+    // 作成中にキャンセルされていたら、できたプランは履歴に出さず終了する。
+    const fresh = await getPlanJob(env.DB, id);
+    if (fresh && fresh.status === 'cancelled') {
+      await hidePlan(env.DB, r.id);
+      return;
+    }
     await updatePlanJob(env.DB, id, { status: 'done', planId: r.id, now: new Date().toISOString() });
   } catch (e) {
     await updatePlanJob(env.DB, id, {

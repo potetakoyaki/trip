@@ -150,10 +150,6 @@
 
           <div class="options">
             <label class="switch">
-              <input type="checkbox" id="autoScrape" checked />
-              <span>作成時に最新情報を自動収集する</span>
-            </label>
-            <label class="switch">
               <input type="checkbox" id="eco" />
               <span>🌱 省エネモード（軽量AIで作成・無料枠を節約）</span>
             </label>
@@ -175,6 +171,7 @@
             <span id="cp-count"></span>
           </div>
           <div class="cp-track"><div id="cp-fill" class="cp-fill"></div></div>
+          <button type="button" id="cancel-btn" class="btn-cancel hidden">✕ キャンセル</button>
         </div>
         <p id="status" class="status"></p>
       </section>
