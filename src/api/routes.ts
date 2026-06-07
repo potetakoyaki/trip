@@ -28,6 +28,60 @@ function reqOrigin(reqUrl: string): string | undefined {
   }
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const str = (v: unknown, max: number): string | undefined =>
+  typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined;
+const strArr = (v: unknown, max = 20): string[] | undefined =>
+  Array.isArray(v)
+    ? v.filter((x) => typeof x === 'string').map((x) => x.trim().slice(0, 40)).filter(Boolean).slice(0, max)
+    : undefined;
+
+/** /api/plan の入力を検証・サニタイズする。 */
+function validatePlanRequest(body: any): { ok: true; req: PlanRequest } | { ok: false; error: string } {
+  if (!body || typeof body !== 'object') return { ok: false, error: 'リクエストの形式が不正です' };
+
+  const startDate = body.startDate;
+  const endDate = body.endDate;
+  if (!DATE_RE.test(startDate ?? '')) return { ok: false, error: '開始日を YYYY-MM-DD で指定してください' };
+  if (!DATE_RE.test(endDate ?? '')) return { ok: false, error: '終了日を YYYY-MM-DD で指定してください' };
+  const s = new Date(`${startDate}T00:00:00Z`);
+  const e = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return { ok: false, error: '日付が不正です' };
+  if (e < s) return { ok: false, error: '終了日は開始日以降にしてください' };
+  const days = Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
+  if (days > 31) return { ok: false, error: '旅行期間が長すぎます（最大31日）' };
+
+  let budget: number | undefined;
+  if (body.budget != null && body.budget !== '') {
+    const b = Number(body.budget);
+    if (!Number.isFinite(b) || b < 0 || b > 100_000_000)
+      return { ok: false, error: '予算は0〜1億円の範囲で指定してください' };
+    budget = Math.round(b);
+  }
+
+  const pace = ['relaxed', 'normal', 'packed'].includes(body.pace) ? body.pace : undefined;
+  const weather = ['any', 'sunny', 'rainy'].includes(body.weather) ? body.weather : undefined;
+
+  const req: PlanRequest = {
+    area: str(body.area, 80),
+    startDate,
+    endDate,
+    interests: strArr(body.interests),
+    budget,
+    pace,
+    weather,
+    companions: str(body.companions, 40),
+    vibe: str(body.vibe, 40),
+    origin: str(body.origin, 80),
+    transport: str(body.transport, 40),
+    keyword: str(body.keyword, 80),
+    hotelFeatures: strArr(body.hotelFeatures),
+    autoScrape: body.autoScrape === false ? false : true,
+    engine: body.engine === 'rule' ? 'rule' : undefined,
+  };
+  return { ok: true, req };
+}
+
 api.get('/health', (c) =>
   c.json({ ok: true, now: new Date().toISOString(), aiAvailable: Boolean(c.env.AI) }),
 );
@@ -178,15 +232,10 @@ api.get('/events', async (c) => {
 });
 
 api.post('/plan', async (c) => {
-  let body: PlanRequest;
-  try {
-    body = await c.req.json<PlanRequest>();
-  } catch {
-    return c.json({ error: 'JSON ボディが不正です' }, 400);
-  }
-  if (!body.startDate || !body.endDate) {
-    return c.json({ error: 'startDate と endDate は必須です' }, 400);
-  }
+  const raw = await c.req.json<any>().catch(() => null);
+  const valid = validatePlanRequest(raw);
+  if (!valid.ok) return c.json({ error: valid.error }, 400);
+  const body = valid.req;
 
   // プラン作成のたびに毎回、最新情報を取得してから組み立てる（再取得の制限なし）。
   // 相手サーバーへの配慮はレート制限（ホスト別3秒間隔）・逐次処理・robots遵守で担保する。
