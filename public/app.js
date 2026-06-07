@@ -163,9 +163,23 @@ async function runScrape(ev) {
   setStatus('スクレイピングを実行中...（有効なソースのみ）');
   try {
     const summary = await api('/scrape', { method: 'POST' });
-    const ok = summary.results.filter((r) => r.status === 'ok').length;
-    setStatus(`完了: ${summary.total} 件取得 / 成功 ${ok} ソース。`, 'ok');
+    const results = summary.results || [];
+    const ok = results.filter((r) => r.status === 'ok').length;
+    const skipped = results.filter((r) => r.status === 'skipped');
+    const failed = results.filter((r) => r.status === 'error');
     await loadSources();
+
+    if (results.length === 0) {
+      setStatus('有効なソースがありません。sources テーブルで対象を有効化してください（README参照）。', 'err');
+    } else if (failed.length) {
+      const detail = failed.map((r) => `${r.source}: ${r.message}`).join(' / ');
+      setStatus(`一部失敗（取得 ${summary.total} 件 / 成功 ${ok}）。失敗: ${detail}`, 'err');
+    } else if (ok === 0 && skipped.length) {
+      const detail = skipped.map((r) => `${r.source}: ${r.message}`).join(' / ');
+      setStatus(`実行対象なし（スキップ）。${detail}`, 'err');
+    } else {
+      setStatus(`完了: ${summary.total} 件取得 / 成功 ${ok} ソース。`, 'ok');
+    }
   } catch (e) {
     setStatus('エラー: ' + e.message, 'err');
   } finally {
