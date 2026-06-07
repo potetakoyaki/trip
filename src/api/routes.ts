@@ -42,6 +42,14 @@ api.get('/ai-test', async (c) => {
   return c.json(out);
 });
 
+// 診断用: 楽天トラベルAPIが設定・動作しているか確認する。
+api.get('/hotels-test', async (c) => {
+  const area = c.req.query('area') || '箱根';
+  const configured = Boolean(c.env.RAKUTEN_APP_ID);
+  const hotels = await fetchRakutenHotels(c.env, area);
+  return c.json({ configured, area, count: hotels.length, hotels });
+});
+
 api.get('/sources', async (c) => {
   const sources = await getSources(c.env.DB);
   return c.json({ sources });

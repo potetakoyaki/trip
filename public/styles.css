@@ -644,6 +644,21 @@ select:focus {
   font-size: 0.8rem;
   color: var(--muted);
 }
+.item-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+}
+.item-links a {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--brand-ink);
+  text-decoration: none;
+}
+.item-links a:hover {
+  text-decoration: underline;
+}
 .empty-day {
   color: var(--muted);
   font-size: 0.88rem;

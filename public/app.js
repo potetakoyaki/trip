@@ -228,13 +228,12 @@ function renderItem(it) {
   const time = it.time
     ? `<span class="item-time">${esc(it.time)}</span>`
     : `<span class="item-time tba">時間自由</span>`;
-  const title = it.url
-    ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>`
-    : esc(it.title);
+
   const meta = [];
   if (it.category) meta.push(`<span class="badge">${catEmoji(it.category)} ${esc(it.category)}</span>`);
   if (it.location) meta.push(`<span>📍 ${esc(it.location)}</span>`);
-  if (it.price != null) meta.push(`<span class="item-price">¥${Number(it.price).toLocaleString()}</span>`);
+  const cost = it.price != null ? it.price : it.estCost;
+  if (cost != null) meta.push(`<span class="item-price">${cost === 0 ? '無料' : '目安 ' + yen(cost)}</span>`);
 
   const detail = [];
   if (it.why) detail.push(`<p class="why"><b>💡 おすすめ</b>${esc(it.why)}</p>`);
@@ -244,12 +243,21 @@ function renderItem(it) {
   if (it.duration) sub.push(`⏱ 滞在目安 ${esc(it.duration)}`);
   if (it.alt) sub.push(`🔄 ${esc(it.alt)}`);
 
+  // 地図・公式サイト・情報元へのリンク（名称から確実に生成）
+  const q = encodeURIComponent(`${it.title} ${it.location || ''}`.trim());
+  const links = [
+    `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>`,
+    `<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式サイト</a>`,
+  ];
+  if (it.url) links.push(`<a href="${esc(it.url)}" target="_blank" rel="noopener">📰 情報元</a>`);
+
   return `
     <div class="item">
-      <div class="item-top">${time}<span class="item-title">${title}</span></div>
+      <div class="item-top">${time}<span class="item-title">${esc(it.title)}</span></div>
       ${meta.length ? `<div class="item-meta">${meta.join('')}</div>` : ''}
       ${detail.join('')}
       ${sub.length ? `<div class="item-sub">${sub.join('　·　')}</div>` : ''}
+      <div class="item-links">${links.join('')}</div>
     </div>`;
 }
 
