@@ -83,6 +83,8 @@ async function submitPlan(ev) {
       weather: $('weather').value,
       companions: $('companions').value || undefined,
       vibe: $('vibe').value || undefined,
+      origin: $('origin').value.trim() || undefined,
+      transport: $('transport').value || undefined,
       autoScrape,
     };
     const data = await api('/plan', {
@@ -115,9 +117,6 @@ function renderPlan(data) {
   const theme = plan.theme ? `<div class="plan-theme">${esc(plan.theme)}</div>` : '';
   const summaryText =
     plan.summary && plan.summary !== plan.theme ? `<div class="summary-text">${esc(plan.summary)}</div>` : '';
-  const metaParts = [];
-  if (plan.totalEstimatedCost) metaParts.push(`<span class="cost">概算 ¥${plan.totalEstimatedCost.toLocaleString()} / 人</span>`);
-  const meta = metaParts.length ? `<div class="summary-meta">${metaParts.join(' ')}</div>` : '';
   const highlights = (plan.highlights || []).length
     ? `<div class="highlights">${plan.highlights.map((h) => `<span class="tag">★ ${esc(h)}</span>`).join('')}</div>`
     : '';
@@ -126,14 +125,80 @@ function renderPlan(data) {
         .map((a) => `<li>${esc(a)}</li>`)
         .join('')}</ul></div>`
     : '';
-  $('plan-summary').innerHTML =
-    `<div class="summary-box">${theme}${summaryText}${meta}${highlights}</div>${advice}`;
+
+  let html = `<div class="summary-box">${theme}${summaryText}${highlights}</div>`;
+  if (plan.travel) html += renderTravel(plan.travel);
+  if (plan.costBreakdown) html += renderCost(plan.costBreakdown);
+  if (plan.hotels && plan.hotels.length) html += renderHotels(plan.hotels);
+  html += advice;
+  $('plan-summary').innerHTML = html;
 
   const daysEl = $('plan-days');
   daysEl.innerHTML = '';
   plan.days.forEach((day, i) => daysEl.insertAdjacentHTML('beforeend', renderDay(day, i)));
 
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+const yen = (n) => '¥' + Number(n || 0).toLocaleString();
+
+function renderTravel(t) {
+  const bits = [];
+  if (t.distance) bits.push(`距離 ${esc(t.distance)}`);
+  if (t.duration) bits.push(`片道 ${esc(t.duration)}`);
+  if (t.costRoundTrip) bits.push(`往復 ${yen(t.costRoundTrip)}`);
+  const mode = t.mode ? `（${esc(t.mode)}）` : '';
+  return `<div class="info-card">
+    <div class="info-h">🚆 ${esc(t.from || '出発地')} → ${esc(t.to || '目的地')}${mode}</div>
+    ${bits.length ? `<div class="pills">${bits.map((b) => `<span class="pill">${b}</span>`).join('')}</div>` : ''}
+    ${t.note ? `<p class="info-note">${esc(t.note)}</p>` : ''}
+  </div>`;
+}
+
+function renderCost(c) {
+  const rows = [
+    [`ホテル${c.nights ? `（${c.nights}泊）` : ''}`, c.hotel],
+    ['食事', c.food],
+    ['観光・体験', c.activities],
+  ]
+    .map(([l, v]) => `<div class="cost-row"><span>${l}</span><span>${yen(v)}</span></div>`)
+    .join('');
+  const stay = `<div class="cost-row total"><span>滞在費合計</span><b>${yen(c.stayTotal)}</b></div>`;
+  const transport = c.transport
+    ? `<div class="cost-row"><span>交通（往復）</span><span>${yen(c.transport)}</span></div>`
+    : '';
+  const grand = `<div class="cost-row grand"><span>総額（滞在費＋交通）</span><b>${yen(c.grandTotal)}</b></div>`;
+  let budget = '';
+  if (c.budget != null) {
+    const diff = Math.abs(c.stayTotal - c.budget);
+    budget = c.withinBudget
+      ? `<div class="budget ok">✓ 予算内（滞在費 ${yen(c.stayTotal)} / 予算 ${yen(c.budget)}）</div>`
+      : `<div class="budget over">⚠ 予算オーバー +${yen(diff)}（滞在費 ${yen(c.stayTotal)} / 予算 ${yen(c.budget)}）</div>`;
+  }
+  return `<div class="info-card">
+    <div class="info-h">💰 費用の目安（1人）</div>
+    ${rows}${stay}${transport}${grand}${budget}
+    <p class="info-note">※AIによる概算です。実際の料金は各予約サイト等でご確認ください。</p>
+  </div>`;
+}
+
+function renderHotels(hotels) {
+  const list = hotels
+    .map(
+      (h) => `<div class="hotel">
+      <div class="hotel-top"><span class="hotel-name">${esc(h.name)}</span>${
+        h.nightlyPrice ? `<span class="hotel-price">${yen(h.nightlyPrice)} / 泊・人〜</span>` : ''
+      }</div>
+      ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
+      ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
+    </div>`,
+    )
+    .join('');
+  return `<div class="info-card">
+    <div class="info-h">🏨 宿泊の候補</div>
+    ${list}
+    <p class="info-note">※価格は目安です。空室・料金は予約サイトでご確認ください。</p>
+  </div>`;
 }
 
 function renderDay(day, i) {

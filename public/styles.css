@@ -320,6 +320,128 @@ select:focus {
   color: var(--ink-soft);
   margin: 3px 0;
 }
+
+/* info cards: travel / cost / hotels */
+.info-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 15px 18px;
+  margin-bottom: 16px;
+  background: #fff;
+}
+.info-h {
+  font-weight: 800;
+  font-size: 0.98rem;
+  margin-bottom: 10px;
+  color: var(--ink);
+}
+.info-note {
+  margin: 10px 0 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pill {
+  background: #eef2ff;
+  color: var(--brand-ink);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+.info-card .info-note + .pills {
+  margin-top: 8px;
+}
+.info-card p.info-note + * {
+  margin-top: 8px;
+}
+.info-card .info-h ~ p {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  line-height: 1.7;
+}
+
+/* cost breakdown */
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+  border-bottom: 1px dashed var(--line);
+}
+.cost-row span:last-child {
+  font-variant-numeric: tabular-nums;
+}
+.cost-row.total {
+  color: var(--ink);
+  font-weight: 700;
+  border-bottom: 2px solid var(--line);
+}
+.cost-row.grand {
+  color: var(--brand-ink);
+  font-weight: 800;
+  font-size: 1.02rem;
+  border-bottom: none;
+  padding-top: 8px;
+}
+.budget {
+  margin-top: 10px;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+.budget.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.budget.over {
+  background: var(--err-bg);
+  color: var(--err);
+}
+
+/* hotels */
+.hotel {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.hotel:last-of-type {
+  border-bottom: none;
+}
+.hotel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.hotel-name {
+  font-weight: 700;
+}
+.hotel-price {
+  flex: 0 0 auto;
+  color: var(--brand-ink);
+  font-weight: 800;
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+.hotel-area {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.hotel-why {
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  margin-top: 4px;
+  line-height: 1.6;
+}
 .summary-meta {
   margin-top: 8px;
   font-size: 0.9rem;

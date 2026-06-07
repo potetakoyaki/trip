@@ -25,6 +25,24 @@
 
           <div class="grid-2">
             <div class="field">
+              <label for="origin">出発地点</label>
+              <input type="text" id="origin" placeholder="例: 新宿 / 東京駅 / 名古屋" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="transport">移動手段</label>
+              <select id="transport">
+                <option value="">指定なし</option>
+                <option value="電車">電車</option>
+                <option value="新幹線">新幹線</option>
+                <option value="車">車</option>
+                <option value="飛行機">飛行機</option>
+                <option value="高速バス">高速バス</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
               <label for="startDate">開始日</label>
               <input type="date" id="startDate" required />
             </div>

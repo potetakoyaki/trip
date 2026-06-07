@@ -9,6 +9,29 @@ const SCHEMA = {
   properties: {
     theme: { type: 'string' },
     advice: { type: 'array', items: { type: 'string' } },
+    travel: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string' },
+        distance: { type: 'string' },
+        duration: { type: 'string' },
+        costRoundTrip: { type: 'number' },
+        note: { type: 'string' },
+      },
+    },
+    hotels: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          area: { type: 'string' },
+          nightlyPrice: { type: 'number' },
+          why: { type: 'string' },
+        },
+        required: ['name'],
+      },
+    },
     days: {
       type: 'array',
       items: {
@@ -28,6 +51,7 @@ const SCHEMA = {
                 access: { type: 'string' },
                 duration: { type: 'string' },
                 alt: { type: 'string' },
+                estCost: { type: 'number' },
               },
               required: ['title', 'why', 'tips'],
             },
@@ -41,18 +65,17 @@ const SCHEMA = {
 };
 
 /**
- * Workers AI で「理由・楽しみ方つき」の日程プランを生成する。
- * 候補スポットの中から AI が選んで組み立て、各スポットに提案理由・楽しみ方・
- * 滞在目安・代替案を付ける。天気/同行者/テーマの条件も反映する。
- * 失敗時・AI 不在時はルールベースにフォールバック。
+ * Workers AI で「理由・楽しみ方・行き方・費用つき」の旅行プランを生成する。
+ * 候補スポットから AI が選んで組み立て、出発地からの移動（目安）・ホテル候補・
+ * 各スポットの目安費用を出し、予算（滞在費＋ホテル）と比較する内訳も作る。
  */
 export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanRequest): Promise<Plan> {
   if (!env.AI || events.length === 0) return generateRulePlan(events, req);
 
   const dates = enumerateDates(req.startDate, req.endDate);
+  const nights = Math.max(0, dates.length - 1);
   const perDay = PER_DAY[req.pace ?? 'normal'];
 
-  // 候補（タイトルで後から実データに突き合わせる）
   const byTitle = new Map<string, EventRecord>();
   for (const e of events) if (!byTitle.has(e.title)) byTitle.set(e.title, e);
   const candidates = events.slice(0, 36).map((e) => ({
@@ -64,37 +87,41 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
   }));
 
   const sys =
-    'あなたは経験豊富な旅行コンシェルジュです。与えられた候補スポットだけを使って、魅力的で現実的な旅行プランをJSONで作成します。候補に無い場所を創作してはいけません。各スポットには「なぜおすすめか(why)」と「楽しみ方のコツ(tips)」を、ありきたりでなく具体的に書きます。';
+    'あなたは経験豊富な旅行コンシェルジュです。与えられた候補スポットを使い、魅力的で現実的な旅行プランをJSONで作成します。候補に無い観光地は創作しません（ただしホテルと移動・費用の目安は一般知識で補ってよい）。各項目は具体的で実用的に書きます。費用はすべて1人あたりの円の目安です。';
 
   const cond: string[] = [];
-  if (req.area) cond.push(`エリア: ${req.area}`);
-  cond.push(`日程: ${dates.length}日間（${dates[0]} 〜 ${dates[dates.length - 1]}）`);
+  if (req.area) cond.push(`旅行先エリア: ${req.area}`);
+  if (req.origin) cond.push(`出発地点: ${req.origin}`);
+  if (req.transport) cond.push(`移動手段: ${req.transport}`);
+  cond.push(`日程: ${dates.length}日間 / ${nights}泊（${dates[0]} 〜 ${dates[dates.length - 1]}）`);
   cond.push(`1日あたり ${perDay} 件程度`);
   if (req.interests?.length) cond.push(`興味: ${req.interests.join('、')}`);
-  if (req.budget) cond.push(`予算の目安: 1人 ${req.budget.toLocaleString()}円`);
-  if (req.weather === 'rainy') cond.push('天気: 雨（屋内・雨でも楽しめる場所を優先し、各スポットに雨天時の楽しみ方を)');
-  if (req.weather === 'sunny') cond.push('天気: 晴れ（屋外・景色を楽しめる場所を優先）');
-  if (req.companions) cond.push(`同行者: ${req.companions}（その層に合った提案・楽しみ方に）`);
+  if (req.budget) cond.push(`予算(滞在費＋ホテル)の目安: 1人 ${req.budget.toLocaleString()}円`);
+  if (req.weather === 'rainy') cond.push('天気: 雨（屋内・雨でも楽しめる場所を優先）');
+  if (req.weather === 'sunny') cond.push('天気: 晴れ（屋外・景色を優先）');
+  if (req.companions) cond.push(`同行者: ${req.companions}`);
   if (req.vibe) cond.push(`テーマの志向: ${req.vibe}`);
 
+  const travelReq = req.origin
+    ? `- travel: 「${req.origin}」から「${req.area ?? '旅行先'}」へ${req.transport ?? '公共交通機関'}で行く場合の目安。mode(手段), distance(距離の目安 例"80km"), duration(片道の所要 例"約90分"), costRoundTrip(往復の目安・円の数値), note(具体的な経路・乗換・路線/高速道路名など)。`
+    : '- travel: 出発地が未指定なので省略可。';
+
   const user = [
-    '次の条件と候補から、日程ごとの旅行プランを作ってください。',
+    '次の条件と候補から、費用と移動つきの旅行プランを作ってください。',
     '— 条件 —',
     ...cond,
-    '— 候補スポット（この中からのみ選ぶ。titleは候補のものを完全一致で使う） —',
+    '— 候補スポット（観光/グルメ等。titleは候補と完全一致で使う） —',
     JSON.stringify(candidates, null, 0),
-    '— 出力要件（具体的に・自然な文章で） —',
-    '- theme: このプラン全体のキャッチーなテーマ（例「芦ノ湖と温泉でめぐる箱根満喫2日間」）',
-    '- advice: 旅行全体を楽しむコツを4〜5個（移動手段・服装・時間帯・予約・持ち物など実用的に）',
-    '- days[].theme: その日のねらいを一言',
-    '- days[].items[] 各フィールド:',
-    '   title(候補と完全一致), time(目安の時刻 例"10:00"), category,',
-    '   why: なぜおすすめかを80〜140字の自然な文章で。何が見どころで、どんな人・気分に向くかまで具体的に。',
-    '   tips: 楽しみ方を80〜140字で具体的に。回り方・名物や食べるべき物・写真スポット・ベストな時間帯など。',
-    '   access: 行き方を一言（最寄り駅/バス停・そこからの所要や手段。例「箱根登山バスで〇分」）。',
-    '   duration: 滞在の目安（例"1.5時間"）。 alt: 雨天や時間が無い時の代替案。',
-    '- 各日、可能ならランチまたはカフェ（グルメ/宿泊カテゴリや飲食系の候補）を1件は組み込む。',
-    '同じ場所を複数日で重複させない。候補に無い場所は作らない。JSONのみ出力。',
+    '— 出力要件（1人あたり・円。自然な文章で具体的に） —',
+    '- theme: 全体のキャッチーなテーマ',
+    '- advice: 旅行を楽しむコツを4〜5個',
+    travelReq,
+    `- hotels: 「${req.area ?? '旅行先'}」の宿泊先を2〜3件（候補に宿泊系があれば優先、無ければ定番を一般知識で）。各 name, area, nightlyPrice(1泊1人の目安・円の数値), why(おすすめ理由)。`,
+    '- days[].theme: その日のねらい',
+    '- days[].items[]: title(候補と一致), time(例"10:00"), category,',
+    '   why(おすすめ理由を80〜140字), tips(楽しみ方を80〜140字。名物/回り方/ベスト時間帯),',
+    '   access(行き方を一言), duration(滞在目安), alt(代替案), estCost(その場所の目安費用・円の数値。入場料や飲食代。無料は0)。',
+    '- 各日できればランチ/カフェを1件入れる。同じ場所を重複させない。JSONのみ出力。',
   ].join('\n');
 
   try {
@@ -110,7 +137,8 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
     if (!parsed || !Array.isArray(parsed.days)) throw new Error('AI応答を解釈できませんでした');
 
     const used = new Set<string>();
-    let totalCost = 0;
+    let food = 0;
+    let activities = 0;
     const days: PlanDay[] = dates.map((date, i) => {
       const aiDay = parsed.days[i] ?? {};
       const rawItems: any[] = Array.isArray(aiDay.items) ? aiDay.items : [];
@@ -120,11 +148,14 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
         if (!title || used.has(title)) continue;
         used.add(title);
         const rec = matchRecord(byTitle, title);
-        if (rec?.price != null) totalCost += rec.price;
+        const category = rec?.category ?? cleanStr(it?.category);
+        const cost = rec?.price ?? cleanNum(it?.estCost) ?? 0;
+        if (category === 'グルメ') food += cost;
+        else activities += cost;
         items.push({
           title,
           time: cleanStr(it?.time),
-          category: rec?.category ?? cleanStr(it?.category),
+          category,
           location: rec?.location_name ?? rec?.city ?? rec?.prefecture ?? undefined,
           url: rec?.url ?? undefined,
           price: rec?.price ?? undefined,
@@ -133,6 +164,7 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
           access: cleanStr(it?.access),
           duration: cleanStr(it?.duration),
           alt: cleanStr(it?.alt),
+          estCost: cleanNum(it?.estCost),
         });
       }
       items.sort((a, b) => (a.time ?? '99:99').localeCompare(b.time ?? '99:99'));
@@ -141,6 +173,51 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
 
     const totalItems = days.reduce((n, d) => n + d.items.length, 0);
     if (totalItems === 0) throw new Error('AIが候補を配置できませんでした');
+
+    // ホテル
+    const hotels = Array.isArray(parsed.hotels)
+      ? parsed.hotels
+          .filter((h: any) => h && typeof h.name === 'string')
+          .slice(0, 3)
+          .map((h: any) => ({
+            name: String(h.name),
+            area: cleanStr(h.area),
+            nightlyPrice: cleanNum(h.nightlyPrice),
+            why: cleanStr(h.why),
+          }))
+      : [];
+
+    // 移動
+    let travel = undefined;
+    if (req.origin && parsed.travel && typeof parsed.travel === 'object') {
+      travel = {
+        from: req.origin,
+        to: req.area,
+        mode: cleanStr(parsed.travel.mode) ?? req.transport,
+        distance: cleanStr(parsed.travel.distance),
+        duration: cleanStr(parsed.travel.duration),
+        costRoundTrip: cleanNum(parsed.travel.costRoundTrip),
+        note: cleanStr(parsed.travel.note),
+      };
+    }
+
+    // 費用内訳（1人あたり）
+    const hotelNightly = hotels[0]?.nightlyPrice ?? 0;
+    const hotelTotal = hotelNightly * nights;
+    const stayTotal = hotelTotal + food + activities;
+    const transport = travel?.costRoundTrip ?? 0;
+    const grandTotal = stayTotal + transport;
+    const costBreakdown = {
+      nights,
+      hotel: hotelTotal,
+      food,
+      activities,
+      stayTotal,
+      transport,
+      grandTotal,
+      budget: req.budget,
+      withinBudget: req.budget != null ? stayTotal <= req.budget : undefined,
+    };
 
     const highlights = days.flatMap((d) => d.items).slice(0, 5).map((it) => it.title);
     const advice = Array.isArray(parsed.advice)
@@ -151,9 +228,12 @@ export async function generateAiPlan(env: Env, events: EventRecord[], req: PlanR
       theme: cleanStr(parsed.theme),
       days,
       summary: cleanStr(parsed.theme) ?? `${req.area ?? ''}の${dates.length}日間プラン`,
-      totalEstimatedCost: totalCost,
+      totalEstimatedCost: grandTotal,
       highlights,
       advice,
+      travel,
+      hotels,
+      costBreakdown,
       engine: 'ai',
     };
   } catch {
@@ -173,6 +253,15 @@ function cleanStr(v: unknown): string | undefined {
   if (typeof v !== 'string') return undefined;
   const s = v.trim();
   return s ? s : undefined;
+}
+
+function cleanNum(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.round(v);
+  if (typeof v === 'string') {
+    const n = Number(v.replace(/[^0-9.]/g, ''));
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
+  }
+  return undefined;
 }
 
 /** JSONモードはオブジェクトを返すが、文字列で返る場合にも対応。 */

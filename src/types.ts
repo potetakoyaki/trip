@@ -83,6 +83,10 @@ export interface PlanRequest {
   weather?: 'any' | 'sunny' | 'rainy';
   companions?: string; // ひとり / カップル / 家族 / 友人 など
   vibe?: string; // 定番 / 穴場 / グルメ重視 / のんびり など
+  /** 出発地点（例: 新宿 / 東京駅 / 名古屋）。 */
+  origin?: string;
+  /** 移動手段（電車 / 新幹線 / 車 / 飛行機 / バス）。 */
+  transport?: string;
 }
 
 export interface PlanItem {
@@ -102,6 +106,8 @@ export interface PlanItem {
   duration?: string;
   /** 雨天や時間が無いときの代替案。 */
   alt?: string;
+  /** その場所の目安費用（入場料・飲食代など、円）。 */
+  estCost?: number;
 }
 
 export interface PlanDay {
@@ -109,6 +115,44 @@ export interface PlanDay {
   items: PlanItem[];
   /** その日のテーマ/ねらい。 */
   theme?: string;
+}
+
+/** 出発地点から旅行先までの移動（目安）。 */
+export interface TravelLeg {
+  from?: string;
+  to?: string;
+  mode?: string;
+  distance?: string;
+  duration?: string;
+  /** 往復の目安費用（円）。 */
+  costRoundTrip?: number;
+  /** 具体的な経路・乗り換え・道路など。 */
+  note?: string;
+}
+
+export interface HotelOption {
+  name: string;
+  area?: string;
+  /** 1泊1人あたりの目安（円）。 */
+  nightlyPrice?: number;
+  why?: string;
+  url?: string;
+}
+
+/** 費用の内訳（円・1人あたり）。 */
+export interface CostBreakdown {
+  nights: number;
+  hotel: number;
+  food: number;
+  activities: number;
+  /** 旅行先での滞在費合計（ホテル＋食事＋観光）。予算と比較する対象。 */
+  stayTotal: number;
+  /** 出発地からの往復交通費。 */
+  transport: number;
+  /** 総額（滞在費＋交通）。 */
+  grandTotal: number;
+  budget?: number;
+  withinBudget?: boolean;
 }
 
 export interface Plan {
@@ -120,5 +164,11 @@ export interface Plan {
   highlights: string[];
   /** 旅行全体の楽しみ方アドバイス。 */
   advice?: string[];
+  /** 出発地からの移動（目安）。 */
+  travel?: TravelLeg;
+  /** ホテル候補。 */
+  hotels?: HotelOption[];
+  /** 費用内訳。 */
+  costBreakdown?: CostBreakdown;
   engine: 'rule' | 'ai';
 }
