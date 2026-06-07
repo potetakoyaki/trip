@@ -84,6 +84,9 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
     url: e.url ?? undefined,
     price: e.price ?? undefined,
     description: e.description ?? undefined,
+    hours: e.hours ?? undefined,
+    lat: e.lat ?? undefined,
+    lng: e.lng ?? undefined,
   }));
 
   const id = crypto.randomUUID();

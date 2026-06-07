@@ -381,6 +381,15 @@ export async function cancelPlanJob(db: D1Database, id: string, now: string): Pr
   return (res.meta?.changes ?? 0) > 0;
 }
 
+/** events に hours 列が無ければ追加する（営業時間・冪等）。 */
+export async function ensureEventsColumns(db: D1Database): Promise<void> {
+  try {
+    await db.prepare('ALTER TABLE events ADD COLUMN hours TEXT').run();
+  } catch {
+    /* 既に存在する */
+  }
+}
+
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */
 export async function upsertEvents(
   db: D1Database,
@@ -389,17 +398,18 @@ export async function upsertEvents(
   scrapedAt: string,
 ): Promise<number> {
   if (!events.length) return 0;
+  await ensureEventsColumns(db);
   const stmt = db.prepare(
     `INSERT INTO events
       (id, source, source_event_id, title, description, url, category, tags,
-       prefecture, city, location_name, lat, lng, start_at, end_at, price, image_url, raw, scraped_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       prefecture, city, location_name, lat, lng, start_at, end_at, price, hours, image_url, raw, scraped_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(source, source_event_id) DO UPDATE SET
        title=excluded.title, description=excluded.description, url=excluded.url,
        category=excluded.category, tags=excluded.tags, prefecture=excluded.prefecture,
        city=excluded.city, location_name=excluded.location_name, lat=excluded.lat,
        lng=excluded.lng, start_at=excluded.start_at, end_at=excluded.end_at,
-       price=excluded.price, image_url=excluded.image_url, raw=excluded.raw,
+       price=excluded.price, hours=excluded.hours, image_url=excluded.image_url, raw=excluded.raw,
        scraped_at=excluded.scraped_at`,
   );
 
@@ -421,6 +431,7 @@ export async function upsertEvents(
       e.startAt ?? null,
       e.endAt ?? null,
       e.price ?? null,
+      e.hours ?? null,
       e.imageUrl ?? null,
       e.raw ? JSON.stringify(e.raw).slice(0, 8000) : null,
       scrapedAt,

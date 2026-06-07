@@ -1320,47 +1320,84 @@ select:focus {
   font-size: 0.95rem;
 }
 
-/* found spots: category buckets */
+/* found spots: 大カテゴリー＞中カテゴリー＞スポット の3階層 */
 .cand-head {
   margin-top: 22px;
   margin-bottom: 10px;
   font-weight: 800;
   color: var(--brand-ink);
-  font-size: 0.95rem;
+  font-size: 1.02rem;
+  line-height: 1.5;
 }
-.cat-groups {
+.cand-sub {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.major-groups {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.cat-group {
+.major-group {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fcfdff;
   overflow: hidden;
 }
-.cat-group > summary {
+.major-group > summary {
   list-style: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 13px 14px;
   font-weight: 800;
+  background: #f3f6ff;
 }
-.cat-group > summary::-webkit-details-marker {
+.major-group > summary::-webkit-details-marker {
   display: none;
 }
-.cat-group > summary::before {
+.major-group > summary::before,
+.mid-group > summary::before {
   content: '▸';
   color: var(--muted);
   font-size: 0.8rem;
   transition: transform 0.15s;
 }
-.cat-group[open] > summary::before {
+.major-group[open] > summary::before,
+.mid-group[open] > summary::before {
   transform: rotate(90deg);
 }
-.cat-name {
+.major-name {
+  flex: 1 1 auto;
+}
+.mid-groups {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mid-group {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+.mid-group > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+.mid-group > summary::-webkit-details-marker {
+  display: none;
+}
+.mid-name {
   flex: 1 1 auto;
 }
 .cat-count {
@@ -1371,9 +1408,36 @@ select:focus {
   padding: 1px 10px;
   font-size: 0.78rem;
 }
-.cat-group .cand-list {
+.mid-group .cand-list {
   margin: 0;
-  padding: 0 12px 12px;
+  padding: 0 10px 10px;
+}
+.cand-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 6px;
+}
+.cand-hours {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.cand-actions {
+  margin: 8px 0 4px;
+}
+.cand-add {
+  border: 1.5px solid var(--brand);
+  background: #fff;
+  color: var(--brand-ink);
+  border-radius: 9px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cand-add:hover {
+  background: #eef2ff;
 }
 
 /* reorder buttons on plan items */
@@ -1398,6 +1462,105 @@ select:focus {
 .item-move button:disabled {
   opacity: 0.3;
   cursor: default;
+}
+.item-move .it-del {
+  border-color: #fad1d1;
+  color: var(--err);
+}
+.item-move .it-del:hover {
+  background: var(--err-bg);
+}
+.item-hours {
+  font-weight: 600;
+}
+
+/* selection rationale / enjoyment */
+.why-card {
+  border: 1px solid #e0e7ff;
+  background: #f5f7ff;
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+}
+.why-card.enjoy {
+  border-color: #fde9c8;
+  background: #fffdf6;
+}
+.why-card .why-h {
+  font-weight: 800;
+  font-size: 0.96rem;
+  color: var(--brand-ink);
+  margin-bottom: 5px;
+}
+.why-card.enjoy .why-h {
+  color: #b45309;
+}
+.why-card p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.75;
+  color: var(--ink-soft);
+}
+
+/* dynamic plan evaluation */
+.eval-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 15px 18px;
+  margin: 0 0 18px;
+  background: #fff;
+}
+.eval-h {
+  font-weight: 800;
+  font-size: 1rem;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.eval-note {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.eval-points-h {
+  font-weight: 800;
+  font-size: 0.86rem;
+  color: var(--brand-ink);
+  margin-bottom: 4px;
+}
+.eval-points {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+.eval-points li {
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  margin: 2px 0;
+}
+.eval-warn-h {
+  font-weight: 800;
+  font-size: 0.86rem;
+  color: var(--err);
+  margin-bottom: 4px;
+}
+.eval-warns {
+  margin: 0;
+  padding-left: 20px;
+}
+.eval-warns li {
+  font-size: 0.86rem;
+  color: #b91c1c;
+  margin: 4px 0;
+  line-height: 1.6;
+}
+.eval-ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  font-weight: 700;
 }
 
 /* travel segment between spots */

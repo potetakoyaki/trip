@@ -11,6 +11,7 @@ export interface Spot {
   prefecture?: string;
   city?: string;
   description?: string;
+  hours?: string;
 }
 
 const JSON_SCHEMA = {
@@ -26,6 +27,7 @@ const JSON_SCHEMA = {
           prefecture: { type: 'string' },
           city: { type: 'string' },
           description: { type: 'string' },
+          hours: { type: 'string' },
         },
         required: ['title'],
       },
@@ -44,7 +46,7 @@ function buildMessages(text: string, hint: { area?: string; interests?: string[]
     '次の文章から訪問先を最大12件抽出し、JSONで返してください。',
     ...hintLines,
     '観光名所だけでなく、カフェ・レストラン・名物グルメの店、体験・アクティビティ・レジャー施設・イベントも積極的に拾ってください。',
-    '各要素のフィールド: title(名称・必須), category(グルメ/自然/歴史/アート/音楽/体験/宿泊/祭り/観光 のいずれか), prefecture, city, description(その場所の魅力や名物を40〜80字で具体的に)。',
+    '各要素のフィールド: title(名称・必須), category(グルメ/自然/歴史/アート/音楽/体験/宿泊/祭り/観光 のいずれか), prefecture, city, description(その場所の魅力や名物を40〜80字で具体的に), hours(営業時間。文章に記載があれば "9:00-17:00" の形で。記載が無ければ省略し創作しない)。',
     '',
     '文章:',
     text,

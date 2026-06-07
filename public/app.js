@@ -9,6 +9,7 @@ let currentPlanId = null;
 let currentArea = '';
 let currentTransport = '';
 let currentPlan = null;
+let currentCandidates = [];
 
 const CAT_EMOJI = {
   グルメ: '🍜',
@@ -839,6 +840,9 @@ async function loadAndRenderSavedPlan(planId) {
           url: e.url,
           price: e.price,
           description: e.description,
+          hours: e.hours,
+          lat: e.lat,
+          lng: e.lng,
         })),
       );
     } catch {
@@ -858,13 +862,21 @@ function renderPlan(data) {
   const highlights = (plan.highlights || []).length
     ? `<div class="highlights">${plan.highlights.map((h) => `<span class="tag">★ ${esc(h)}</span>`).join('')}</div>`
     : '';
+  // 選定理由・楽しみ方（プランナーの意図）
+  const rationale = plan.rationale
+    ? `<div class="why-card"><div class="why-h">🧩 なぜこのプランか</div><p>${esc(plan.rationale)}</p></div>`
+    : '';
+  const enjoyment = plan.enjoyment
+    ? `<div class="why-card enjoy"><div class="why-h">✨ このプランの楽しみ方</div><p>${esc(plan.enjoyment)}</p></div>`
+    : '';
   const advice = (plan.advice || []).length
-    ? `<div class="advice"><div class="advice-h">🧭 楽しみ方のヒント</div><ul>${plan.advice
+    ? `<div class="advice"><div class="advice-h">🧭 上手く回るコツ</div><ul>${plan.advice
         .map((a) => `<li>${esc(a)}</li>`)
         .join('')}</ul></div>`
     : '';
 
   let html = `<div class="summary-box">${theme}${summaryText}${highlights}</div>`;
+  html += rationale + enjoyment;
   if (plan.forecast && plan.forecast.length) html += renderForecast(plan.forecast);
   if (plan.travel) html += renderTravel(plan.travel);
   if (plan.costBreakdown) html += renderCost(plan.costBreakdown);
@@ -872,14 +884,20 @@ function renderPlan(data) {
   html += advice;
   $('plan-summary').innerHTML = html;
 
-  const daysEl = $('plan-days');
-  daysEl.innerHTML = plan.days
-    .map((day, i) => `<div class="day" data-day="${i}">${renderDayInner(day, i)}</div>`)
-    .join('');
-
+  renderPlanDays();
   renderCandidates(data.candidates);
 
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 全日のスポットを描画し、評価欄も更新する（編集・並び替えのたびに呼ぶ）。
+function renderPlanDays() {
+  if (!currentPlan) return;
+  const daysEl = $('plan-days');
+  daysEl.innerHTML = currentPlan.days
+    .map((day, i) => `<div class="day" data-day="${i}">${renderDayInner(day, i)}</div>`)
+    .join('');
+  renderEval();
 }
 
 // 1日分の中身（見出し＋ルート＋スポット＋移動）を生成。並び替え時の再描画にも使う。
@@ -913,24 +931,192 @@ function renderDayInner(day, i) {
     <div class="items">${body}</div>`;
 }
 
-// プラン内のスポットを上下に並び替え、その日だけ画面更新なしで再計算する。
+// プラン内のスポットを並び替える。日の端では前日/翌日へ移動（複数日対応）。
+// 画面更新なしで全日を再描画し、評価も再計算する。
 function movePlanItem(dayIndex, idx, dir) {
-  const day = currentPlan && currentPlan.days && currentPlan.days[dayIndex];
-  if (!day) return;
+  const days = currentPlan && currentPlan.days;
+  if (!days) return;
+  const items = days[dayIndex].items;
   const j = idx + dir;
-  if (j < 0 || j >= day.items.length) return;
-  [day.items[idx], day.items[j]] = [day.items[j], day.items[idx]];
-  const el = document.querySelector(`.day[data-day="${dayIndex}"]`);
-  if (el) el.innerHTML = renderDayInner(day, dayIndex);
+  if (j >= 0 && j < items.length) {
+    // 同じ日の中で入れ替え
+    [items[idx], items[j]] = [items[j], items[idx]];
+  } else if (dir === -1 && dayIndex > 0) {
+    // 前日の末尾へ
+    const [it] = items.splice(idx, 1);
+    days[dayIndex - 1].items.push(it);
+  } else if (dir === 1 && dayIndex < days.length - 1) {
+    // 翌日の先頭へ
+    const [it] = items.splice(idx, 1);
+    days[dayIndex + 1].items.unshift(it);
+  } else {
+    return; // 端で移動先なし
+  }
+  renderPlanDays();
 }
 
-const CAT_ORDER = ['グルメ', '自然', '歴史', 'アート', '音楽', '体験', '宿泊', '祭り', 'テック', '観光', 'イベント'];
+// プランからスポットを外す。
+function removePlanItem(dayIndex, idx) {
+  const day = currentPlan && currentPlan.days && currentPlan.days[dayIndex];
+  if (!day) return;
+  day.items.splice(idx, 1);
+  renderPlanDays();
+}
 
-function candCard(c) {
+// 見つかったスポット一覧からプランへ追加する（1日目の末尾に。重複は防ぐ）。
+function addSpotToPlan(candIdx) {
+  if (!currentPlan || !currentPlan.days || !currentPlan.days.length) {
+    setStatus('先にプランを作成してください。', 'err');
+    return;
+  }
+  const c = currentCandidates[candIdx];
+  if (!c) return;
+  const exists = currentPlan.days.some((d) => d.items.some((it) => it.title === c.title));
+  if (exists) {
+    setStatus(`「${c.title}」は既にプランに入っています。`, '');
+    return;
+  }
+  currentPlan.days[0].items.push({
+    title: c.title,
+    category: c.category,
+    location: c.location,
+    url: c.url,
+    price: c.price,
+    hours: c.hours,
+    lat: c.lat,
+    lng: c.lng,
+  });
+  renderPlanDays();
+  setStatus(`「${c.title}」を1日目に追加しました。↑↓で好きな順・日に動かせます。`, 'ok');
+  $('plan-days').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 営業時間 "9:00-17:00" を分（0:00からの分数）の範囲に。深夜跨ぎ・24時間にも対応。
+function parseHoursRange(s) {
+  if (!s) return null;
+  const str = String(s);
+  if (/24\s*時間/.test(str)) return { open: 0, close: 1440 };
+  const m = str.match(/(\d{1,2}):(\d{2})\s*[-〜~–—]+\s*(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const open = Number(m[1]) * 60 + Number(m[2]);
+  let close = Number(m[3]) * 60 + Number(m[4]);
+  if (close <= open) close += 1440; // 深夜営業
+  return { open, close };
+}
+
+// プランをクライアント側で評価する（移動・営業時間・詰め込みを現実的にチェック）。
+function evaluatePlan(plan, mode) {
+  const days = plan.days || [];
+  const warnings = [];
+  const points = [];
+  let totalSpots = 0;
+  let totalKm = 0;
+  let totalTravelMin = 0;
+  const catCount = {};
+  days.forEach((day, di) => {
+    const items = day.items || [];
+    totalSpots += items.length;
+    items.forEach((it) => {
+      const c = it.category || 'その他';
+      catCount[c] = (catCount[c] || 0) + 1;
+    });
+    if (!items.length) {
+      warnings.push(`${di + 1}日目: 予定が空です。スポットを追加しましょう。`);
+      return;
+    }
+    const sched = computeSchedule(items, mode);
+    sched.legs.forEach((leg, i) => {
+      if (!leg) return;
+      totalKm += leg.km || 0;
+      totalTravelMin += leg.minutes || 0;
+      if (leg.minutes >= 90) {
+        warnings.push(
+          `${di + 1}日目: 「${items[i].title}」→「${items[i + 1].title}」の移動が約${leg.minutes}分と長め。移動時間がタイトすぎないか確認を。`,
+        );
+      }
+    });
+    items.forEach((it, i) => {
+      const hr = parseHoursRange(it.hours);
+      const start = parseClock(sched.times[i]);
+      if (!hr || start == null) return;
+      const stay = parseDurationMin(it.duration);
+      if (start < hr.open) {
+        warnings.push(
+          `${di + 1}日目: 「${it.title}」の到着(${sched.times[i]})が営業開始(${fmtClock(hr.open)})より早い計算です。`,
+        );
+      } else if (start + stay > hr.close) {
+        warnings.push(
+          `${di + 1}日目: 「${it.title}」は営業終了(${fmtClock(hr.close % 1440)})に間に合わない計算です（到着${sched.times[i]}＋滞在約${stay}分）。`,
+        );
+      }
+    });
+    const lastStart = parseClock(sched.times[items.length - 1]) ?? 0;
+    const endMin = lastStart + parseDurationMin(items[items.length - 1].duration);
+    if (endMin > 21 * 60) {
+      warnings.push(`${di + 1}日目: 最後の予定が${fmtClock(endMin % 1440)}終わりと遅め。詰め込みすぎかもしれません。`);
+    }
+    if (items.length >= 6) {
+      warnings.push(`${di + 1}日目: スポットが${items.length}件と多め。ゆっくり楽しめない可能性があります。`);
+    }
+  });
+  points.push(`全${days.length}日・スポット計${totalSpots}件`);
+  if (totalKm > 0) {
+    points.push(`移動の合計 約${Math.round(totalKm)}km・約${Math.round(totalTravelMin)}分（${mode || '公共交通'}）`);
+  }
+  const catText = Object.entries(catCount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([c, n]) => `${catEmoji(c)}${c}${n}`)
+    .join('・');
+  if (catText) points.push(`内訳: ${catText}`);
+  return { points, warnings };
+}
+
+// 評価欄を再描画する（プラン編集のたびに呼ばれ、再計算される）。
+function renderEval() {
+  const el = $('plan-eval');
+  if (!el) return;
+  if (!currentPlan) {
+    el.innerHTML = '';
+    return;
+  }
+  const r = evaluatePlan(currentPlan, currentTransport);
+  const points = r.points.length
+    ? `<ul class="eval-points">${r.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`
+    : '';
+  const warns = r.warnings.length
+    ? `<div class="eval-warn-h">⚠ 現実的なチェック（${r.warnings.length}件）</div><ul class="eval-warns">${r.warnings
+        .map((w) => `<li>${esc(w)}</li>`)
+        .join('')}</ul>`
+    : `<div class="eval-ok">✅ 無理のないスケジュールです。移動・営業時間の大きな問題は見つかりませんでした。</div>`;
+  el.innerHTML = `<div class="eval-card">
+    <div class="eval-h">📝 プラン評価<span class="eval-note">編集すると自動で再計算</span></div>
+    <div class="eval-points-h">📌 ポイント</div>${points}
+    ${warns}
+  </div>`;
+}
+
+// 中カテゴリー（既存category）の表示順
+const CAT_ORDER = ['観光', '歴史', 'アート', '自然', '体験', 'グルメ', 'イベント', '祭り', '音楽', 'テック', '宿泊'];
+
+// 大カテゴリー（中カテゴリーをまとめる括り）
+const MAJOR_CATS = [
+  { name: '観光・体験', emoji: '🗺️', mids: ['観光', '歴史', 'アート', '自然', '体験'] },
+  { name: 'グルメ', emoji: '🍜', mids: ['グルメ'] },
+  { name: 'イベント・祭り', emoji: '🎉', mids: ['イベント', '祭り', '音楽', 'テック'] },
+  { name: '宿泊', emoji: '♨️', mids: ['宿泊'] },
+];
+function majorOf(mid) {
+  for (const m of MAJOR_CATS) if (m.mids.includes(mid)) return m;
+  return { name: 'その他', emoji: '📍', mids: [] };
+}
+
+function candCard(c, idx) {
   const q = encodeURIComponent(`${c.title} ${c.location || ''}`.trim());
   const cat = c.category ? `<span class="badge">${catEmoji(c.category)} ${esc(c.category)}</span>` : '';
   const price = c.price != null ? `<span class="item-price">${c.price === 0 ? '無料' : '目安 ' + yen(c.price)}</span>` : '';
   const loc = c.location ? `<span class="cand-loc">📍 ${esc(c.location)}</span>` : '';
+  // 営業時間は必ず明記（不明なら要確認とする）
+  const hours = `<span class="cand-hours">🕒 営業時間: ${c.hours ? esc(c.hours) : '公式サイトで要確認'}</span>`;
   const desc = c.description
     ? `<p class="cand-desc">${esc(c.description)}</p>`
     : `<p class="cand-desc cand-desc-empty">概要はまだありません。下のリンクで確認できます。</p>`;
@@ -940,39 +1126,59 @@ function candCard(c) {
     (c.url ? ` <a href="${esc(c.url)}" target="_blank" rel="noopener">📰 情報元</a>` : '');
   return `<details class="cand">
     <summary><span class="cand-name">${esc(c.title)}</span>${cat}${price}</summary>
-    <div class="cand-body">${loc}${desc}<div class="cand-links">${links}</div>
+    <div class="cand-body"><div class="cand-meta">${loc}${hours}</div>${desc}<div class="cand-links">${links}</div>
+      <div class="cand-actions"><button type="button" class="cand-add" data-cand-idx="${idx}">＋ プランに追加</button></div>
       <div class="item-foot">${spotChecks(c.title, c.prefecture, c.url)}</div></div>
   </details>`;
 }
 
-// 見つかったスポットをカテゴリーの大きな括りで表示し、タップで一覧を展開する。
+// 見つかったスポットを【大カテゴリー＞中カテゴリー＞スポット】の3階層で表示する。
 function renderCandidates(candidates) {
   const el = $('plan-extra');
   if (!el) return;
-  if (!candidates || !candidates.length) {
+  currentCandidates = candidates || [];
+  if (!currentCandidates.length) {
     el.innerHTML = '';
     return;
   }
-  const groups = {};
-  candidates.forEach((c) => {
-    const k = c.category || 'その他';
-    (groups[k] = groups[k] || []).push(c);
+  // 大 → 中 → [{c, i}]
+  const majors = {};
+  currentCandidates.forEach((c, i) => {
+    const mid = c.category || 'その他';
+    const major = majorOf(mid).name;
+    majors[major] = majors[major] || {};
+    (majors[major][mid] = majors[major][mid] || []).push({ c, i });
   });
-  const keys = Object.keys(groups).sort((a, b) => {
-    const ia = CAT_ORDER.indexOf(a);
-    const ib = CAT_ORDER.indexOf(b);
-    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
-  });
-  const groupHtml = keys
-    .map((k) => {
-      const cards = groups[k].map(candCard).join('');
-      return `<details class="cat-group">
-        <summary><span class="cat-name">${catEmoji(k)} ${esc(k)}</span><span class="cat-count">${groups[k].length}</span></summary>
-        <div class="cand-list">${cards}</div>
+  const majorOrder = MAJOR_CATS.map((m) => m.name).concat(['その他']);
+  const majorKeys = Object.keys(majors).sort(
+    (a, b) => (majorOrder.indexOf(a) + 1 || 99) - (majorOrder.indexOf(b) + 1 || 99),
+  );
+  const html = majorKeys
+    .map((mName) => {
+      const mids = majors[mName];
+      const total = Object.values(mids).reduce((n, arr) => n + arr.length, 0);
+      const midKeys = Object.keys(mids).sort((a, b) => {
+        const ia = CAT_ORDER.indexOf(a);
+        const ib = CAT_ORDER.indexOf(b);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
+      });
+      const midHtml = midKeys
+        .map((mid) => {
+          const cards = mids[mid].map(({ c, i }) => candCard(c, i)).join('');
+          return `<details class="mid-group">
+            <summary><span class="mid-name">${catEmoji(mid)} ${esc(mid)}</span><span class="cat-count">${mids[mid].length}</span></summary>
+            <div class="cand-list">${cards}</div>
+          </details>`;
+        })
+        .join('');
+      const emoji = (MAJOR_CATS.find((m) => m.name === mName) || { emoji: '📍' }).emoji;
+      return `<details class="major-group">
+        <summary><span class="major-name">${emoji} ${esc(mName)}</span><span class="cat-count">${total}</span></summary>
+        <div class="mid-groups">${midHtml}</div>
       </details>`;
     })
     .join('');
-  el.innerHTML = `<div class="cand-head">🔎 見つかったスポット（${candidates.length}件・カテゴリーをタップで展開）</div><div class="cat-groups">${groupHtml}</div>`;
+  el.innerHTML = `<div class="cand-head">🔎 見つかったスポット<br><span class="cand-sub">（${currentCandidates.length}件・カテゴリーをタップで展開）</span></div><div class="major-groups">${html}</div>`;
 }
 
 const yen = (n) => '¥' + Number(n || 0).toLocaleString();
@@ -1123,14 +1329,20 @@ function renderItem(it, dayIndex, idx, count, clock) {
   const t = clock || it.time;
   const time = t ? `<span class="item-time">${esc(t)}</span>` : `<span class="item-time tba">時間自由</span>`;
 
+  // 端では前日/翌日へ移動できる（複数日対応）。全体の先頭/末尾だけ無効化。
+  const totalDays = (currentPlan && currentPlan.days && currentPlan.days.length) || 1;
+  const upDisabled = dayIndex === 0 && idx === 0;
+  const downDisabled = dayIndex === totalDays - 1 && idx === count - 1;
   const move = `<span class="item-move">
-    <button type="button" class="mv-up" data-day="${dayIndex}" data-idx="${idx}" aria-label="上へ" ${idx === 0 ? 'disabled' : ''}>▲</button>
-    <button type="button" class="mv-down" data-day="${dayIndex}" data-idx="${idx}" aria-label="下へ" ${idx === count - 1 ? 'disabled' : ''}>▼</button>
+    <button type="button" class="mv-up" data-day="${dayIndex}" data-idx="${idx}" aria-label="上へ/前日へ" ${upDisabled ? 'disabled' : ''}>▲</button>
+    <button type="button" class="mv-down" data-day="${dayIndex}" data-idx="${idx}" aria-label="下へ/翌日へ" ${downDisabled ? 'disabled' : ''}>▼</button>
+    <button type="button" class="it-del" data-day="${dayIndex}" data-idx="${idx}" aria-label="プランから外す" title="プランから外す">✕</button>
   </span>`;
 
   const meta = [];
   if (it.category) meta.push(`<span class="badge">${catEmoji(it.category)} ${esc(it.category)}</span>`);
   if (it.location) meta.push(`<span>📍 ${esc(it.location)}</span>`);
+  if (it.hours) meta.push(`<span class="item-hours">🕒 ${esc(it.hours)}</span>`);
   const cost = it.price != null ? it.price : it.estCost;
   if (cost != null) meta.push(`<span class="item-price">${cost === 0 ? '無料' : '目安 ' + yen(cost)}</span>`);
 
@@ -1220,12 +1432,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (rm) toggleWishlist(rm.dataset.title, false);
   });
 
-  // プラン内スポットの並び替え（↑↓・画面更新なしで移動時間を再計算）。
+  // プラン内スポットの並び替え（↑↓・複数日対応）と削除。編集ごとに評価を再計算。
   $('plan-days').addEventListener('click', (ev) => {
     const up = ev.target.closest('.mv-up');
     if (up) return movePlanItem(Number(up.dataset.day), Number(up.dataset.idx), -1);
     const down = ev.target.closest('.mv-down');
-    if (down) movePlanItem(Number(down.dataset.day), Number(down.dataset.idx), 1);
+    if (down) return movePlanItem(Number(down.dataset.day), Number(down.dataset.idx), 1);
+    const del = ev.target.closest('.it-del');
+    if (del) removePlanItem(Number(del.dataset.day), Number(del.dataset.idx));
+  });
+
+  // 見つかったスポット一覧からプランへ追加。
+  $('plan-extra').addEventListener('click', (ev) => {
+    const add = ev.target.closest('.cand-add');
+    if (add) addSpotToPlan(Number(add.dataset.candIdx));
   });
 
   // スポットの「行った」「行きたい」チェック（イベント委譲）。

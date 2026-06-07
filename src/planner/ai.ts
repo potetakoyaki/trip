@@ -10,6 +10,8 @@ const SCHEMA = {
   type: 'object',
   properties: {
     theme: { type: 'string' },
+    rationale: { type: 'string' },
+    enjoyment: { type: 'string' },
     advice: { type: 'array', items: { type: 'string' } },
     travel: {
       type: 'object',
@@ -54,6 +56,7 @@ const SCHEMA = {
                 duration: { type: 'string' },
                 alt: { type: 'string' },
                 estCost: { type: 'number' },
+                hours: { type: 'string' },
                 lat: { type: 'number' },
                 lng: { type: 'number' },
               },
@@ -124,13 +127,16 @@ export async function generateAiPlan(
     JSON.stringify(candidates, null, 0),
     '— 出力要件（1人あたり・円。自然な文章で具体的に） —',
     '- theme: 全体のキャッチーなテーマ',
-    '- advice: 旅行を楽しむコツを4〜5個',
+    '- rationale: なぜこのスポットの組み合わせ・この順番にしたのかという「選定理由」を150〜250字で。何を軸に選び、どんな体験の流れを意図したかを語る。',
+    '- enjoyment: このプラン全体をどう楽しむか「楽しみ方の提案」を150〜250字で。五感・季節・時間帯・組み合わせの妙など具体的に。',
+    '- advice: 旅行を楽しむコツ・上手く回るコツを4〜5個',
     travelReq,
     `- hotels: 「${req.area ?? '旅行先'}」の宿泊先を2〜3件（候補に宿泊系があれば優先、無ければ定番を一般知識で）。各 name, area, nightlyPrice(1泊1人の目安・円の数値), why(おすすめ理由)。`,
     '- days[].theme: その日のねらい',
     '- days[].items[]: title(候補と一致), time(例"10:00"), category,',
     '   why(おすすめ理由を80〜140字), tips(楽しみ方を80〜140字。名物/回り方/ベスト時間帯),',
     '   access(行き方を一言), duration(滞在目安), alt(代替案), estCost(その場所の目安費用・円の数値。入場料や飲食代。無料は0),',
+    '   hours(営業時間。一般知識でおおよそで良いので必ず入れる。例 "9:00-17:00"。24時間営業は "24時間"、店舗で不明確なら "11:00-22:00頃"),',
     '   lat,lng(その場所のおおよその緯度・経度の数値。地図表示とスポット間の移動時間の概算に使うので必ず入れる)。',
     '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、tips に名物料理・おすすめメニュー・予算感を具体的に書く（estCostに目安）。',
     '  候補に飲食店が少なければ、そのエリアで評判の料理ジャンルや店を一般知識で提案してよい。',
@@ -183,6 +189,7 @@ export async function generateAiPlan(
           duration: cleanStr(it?.duration),
           alt: cleanStr(it?.alt),
           estCost: cleanNum(it?.estCost),
+          hours: rec?.hours ?? cleanStr(it?.hours),
           lat: rec?.lat ?? cleanCoord(it?.lat),
           lng: rec?.lng ?? cleanCoord(it?.lng),
         });
@@ -247,6 +254,8 @@ export async function generateAiPlan(
 
     return {
       theme: cleanStr(parsed.theme),
+      rationale: cleanStr(parsed.rationale),
+      enjoyment: cleanStr(parsed.enjoyment),
       days,
       summary: cleanStr(parsed.theme) ?? `${req.area ?? ''}の${dates.length}日間プラン`,
       totalEstimatedCost: grandTotal,
