@@ -163,6 +163,10 @@ export interface HotelOption {
   nightlyPrice?: number;
   why?: string;
   url?: string;
+  /** 楽天の施設番号（空室検索で指定日の実価格を引くのに使う）。 */
+  hotelNo?: number;
+  /** nightlyPrice が「指定した宿泊日の空室実価格」のとき true（未指定日の最低料金目安なら false）。 */
+  datedPrice?: boolean;
 }
 
 /** 費用の内訳（円・1人あたり）。 */

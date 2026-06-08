@@ -1492,6 +1492,7 @@ function renderCost(c) {
 }
 
 function renderHotels(hotels) {
+  const anyDated = hotels.some((h) => h.datedPrice);
   const list = hotels
     .map((h) => {
       const name = h.url
@@ -1500,9 +1501,12 @@ function renderHotels(hotels) {
       const link = h.url
         ? `<a class="hotel-link" href="${esc(h.url)}" target="_blank" rel="noopener">楽天トラベルで見る →</a>`
         : `<a class="hotel-link" href="https://www.google.com/search?q=${encodeURIComponent(h.name + ' 宿泊 予約')}" target="_blank" rel="noopener">空室・料金を探す →</a>`;
+      const priceLabel = h.datedPrice ? '/ 泊・人〜（指定日）' : '/ 泊・人〜';
       return `<div class="hotel">
       <div class="hotel-top"><span class="hotel-name">${name}</span>${
-        h.nightlyPrice ? `<span class="hotel-price">${yen(h.nightlyPrice)} / 泊・人〜</span>` : ''
+        h.nightlyPrice
+          ? `<span class="hotel-price${h.datedPrice ? ' dated' : ''}">${yen(h.nightlyPrice)} ${priceLabel}</span>`
+          : ''
       }</div>
       ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
       ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
@@ -1511,9 +1515,13 @@ function renderHotels(hotels) {
     })
     .join('');
   return `<div class="info-card">
-    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・予算内/安い順）</div>
+    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・${anyDated ? '指定日の空室・' : ''}安い順）</div>
     ${list}
-    <p class="info-note">※価格は目安です。空室・料金・プランは予約ページでご確認ください。</p>
+    <p class="info-note">${
+      anyDated
+        ? '※価格は指定した宿泊日の空室の最低料金（1泊1人〜）です。最新の空室・プランは予約ページでご確認ください。'
+        : '※価格は目安です。空室・料金・プランは予約ページでご確認ください。'
+    }</p>
   </div>`;
 }
 
