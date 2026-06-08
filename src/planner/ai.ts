@@ -108,13 +108,20 @@ export async function generateAiPlan(
 
   const byTitle = new Map<string, EventRecord>();
   for (const e of events) if (!byTitle.has(e.title)) byTitle.set(e.title, e);
-  const candidates = events.slice(0, 36).map((e) => ({
+  const baseCands = events.slice(0, 36).map((e) => ({
     title: e.title,
     category: e.category ?? undefined,
     area: e.city ?? e.prefecture ?? undefined,
     price: e.price ?? undefined,
     desc: e.description ? String(e.description).slice(0, 120) : undefined,
   }));
+  // 「行きたい」スポット（必ず含める）を候補に足す。
+  const mustInclude = (req.mustInclude ?? []).map((s) => String(s).trim()).filter(Boolean).slice(0, 12);
+  const have = new Set(baseCands.map((c) => c.title));
+  const mustCands = mustInclude
+    .filter((t) => !have.has(t))
+    .map((title) => ({ title, category: undefined, area: req.area, price: undefined, desc: '行きたいスポット（必ず含める）' }));
+  const candidates = [...mustCands, ...baseCands];
 
   const sys =
     'あなたは経験豊富な旅行コンシェルジュです。観光スポットは与えられた候補から選びます。ただし飲食店・カフェ、ホテル、移動・費用の目安は一般知識で補ってよいです。魅力的で現実的な旅行プランをJSONで作成し、各項目は具体的で実用的に書きます。費用はすべて1人あたりの円の目安です。';
@@ -132,6 +139,9 @@ export async function generateAiPlan(
   if (req.companions) cond.push(`同行者: ${req.companions}`);
   if (req.vibe) cond.push(`テーマの志向: ${req.vibe}`);
   if (req.keyword) cond.push(`重視キーワード: 「${req.keyword}」に関するスポット/イベントがあれば必ず入れて中心に据える`);
+  if (mustInclude.length)
+    cond.push(`必ず含める「行きたい」スポット: ${mustInclude.join('、')}（各日のどこかに必ず全て組み込む）`);
+  if (req.refine) cond.push(`ユーザーからの追加リクエスト（最優先で反映する）: 「${req.refine}」`);
 
   const travelReq = req.origin
     ? `- travel: 「${req.origin}」から「${req.area ?? '旅行先'}」へ${req.transport ?? '公共交通機関'}で行く場合の目安。mode(手段), distance(距離の目安 例"80km"), duration(片道の所要 例"約90分"), costRoundTrip(往復の目安・円の数値), note(具体的な経路・乗換・路線/高速道路名など)。`

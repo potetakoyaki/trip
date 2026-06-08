@@ -10,6 +10,10 @@ let currentArea = '';
 let currentTransport = '';
 let currentPlan = null;
 let currentCandidates = [];
+let pendingMustInclude = null; // 行きたいリストから作成する際の必須スポット
+let pendingRefine = null; // 自然言語の調整指示（作り直し/別案）
+let planMap = null; // Leaflet マップ
+let planMapLayers = []; // マップ上のマーカー/線
 
 const CAT_EMOJI = {
   グルメ: '🍜',
@@ -440,6 +444,8 @@ async function loadSharedPlan(id) {
     currentTransport = (d.request && d.request.transport) || '';
     renderPlan({ plan: d.result });
     $('share-btn').classList.remove('hidden');
+    $('print-btn').classList.remove('hidden');
+    $('refine-box').classList.remove('hidden');
     setSaveButton(d.saved !== false);
     setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
   } catch (e) {
@@ -676,7 +682,7 @@ function pollCollect(area, gen) {
 }
 
 function buildPlanBody() {
-  return {
+  const body = {
     area: $('area').value.trim() || undefined,
     startDate: $('startDate').value,
     endDate: $('endDate').value,
@@ -692,6 +698,12 @@ function buildPlanBody() {
     hotelFeatures: getHotelFeatures(),
     eco: $('eco').checked,
   };
+  // 行きたいリスト由来の必須スポット / 自然言語の調整指示（いずれも1回限り）。
+  if (pendingMustInclude && pendingMustInclude.length) body.mustInclude = pendingMustInclude;
+  if (pendingRefine) body.refine = pendingRefine;
+  pendingMustInclude = null;
+  pendingRefine = null;
+  return body;
 }
 
 // 進行中は「プラン作成」「じっくり収集」両方のボタンを無効化する。
@@ -731,13 +743,20 @@ function readBusy() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // プラン作成は「ジョブ化してバックグラウンド実行」。画面を閉じても Cron が完成させる。
-async function submitPlan(ev) {
+function submitPlan(ev) {
   ev.preventDefault();
+  startPlan();
+}
+
+// 実際にプラン作成ジョブを開始する（フォーム送信・行きたい作成・作り直しから共通で使う）。
+async function startPlan() {
   if (!validateForm()) return;
   setBusy(true);
-  // 新規作成中は前回プランの保存/共有ボタンを隠す（完成後に出し直す）。
+  // 新規作成中は前回プランの保存/共有/印刷/調整ボタンを隠す（完成後に出し直す）。
   $('save-btn').classList.add('hidden');
   $('share-btn').classList.add('hidden');
+  $('print-btn').classList.add('hidden');
+  $('refine-box').classList.add('hidden');
   try {
     await resolveArea($('area').value.trim());
     const body = buildPlanBody();
@@ -759,6 +778,44 @@ async function submitPlan(ev) {
     setBusy(false);
     setStatus('エラー: ' + e.message, 'err');
   }
+}
+
+// 「行ってみたい」リストを起点にプランを作成する。
+function genFromWishlist() {
+  if (!wishlistRows.length) {
+    setStatus('先に「行ってみたい」にスポットを追加してください（各スポットの⭐から）。', 'err');
+    return;
+  }
+  // 行きたいスポットで最も多い都道府県をエリアにする（フォームのエリアが優先）。
+  const prefCount = {};
+  wishlistRows.forEach((w) => {
+    const p = w.prefecture || '';
+    if (p && p !== '未分類') prefCount[p] = (prefCount[p] || 0) + 1;
+  });
+  const topPref = Object.entries(prefCount).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const area = $('area').value.trim() || topPref || '';
+  if (!area) {
+    closeDrawer();
+    setStatus('行きたいスポットのエリアが特定できませんでした。エリアを入力してから再度お試しください。', 'err');
+    $('area').focus();
+    return;
+  }
+  $('area').value = area;
+  // そのエリアに属する（都道府県が一致/包含する）行きたいスポットを優先。なければ全件。
+  const inArea = wishlistRows.filter(
+    (w) => !w.prefecture || w.prefecture === topPref || area.includes(w.prefecture) || w.prefecture.includes(area),
+  );
+  pendingMustInclude = (inArea.length ? inArea : wishlistRows).map((w) => w.title).slice(0, 12);
+  closeDrawer();
+  setStatus(`行きたいスポット${pendingMustInclude.length}件を入れたプランを作成します…`, '');
+  startPlan();
+}
+
+// 自然言語の指示でプランを作り直す / 別案を出す。
+function refinePlan(instruction) {
+  if (!currentPlan) return;
+  pendingRefine = instruction;
+  startPlan();
 }
 
 const PLAN_STAGES = [
@@ -865,6 +922,8 @@ async function loadAndRenderSavedPlan(planId) {
   currentTransport = (d.request && d.request.transport) || '';
   renderPlan({ plan: d.result });
   $('share-btn').classList.remove('hidden');
+  $('print-btn').classList.remove('hidden');
+  $('refine-box').classList.remove('hidden');
   setSaveButton(!!d.saved);
   const area = d.request && d.request.area;
   if (area) {
@@ -937,7 +996,7 @@ function renderPlan(data) {
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// 全日のスポットを描画し、評価欄も更新する（編集・並び替えのたびに呼ぶ）。
+// 全日のスポットを描画し、評価欄・地図も更新する（編集・並び替えのたびに呼ぶ）。
 function renderPlanDays() {
   if (!currentPlan) return;
   const daysEl = $('plan-days');
@@ -945,6 +1004,66 @@ function renderPlanDays() {
     .map((day, i) => `<div class="day" data-day="${i}">${renderDayInner(day, i)}</div>`)
     .join('');
   renderEval();
+  renderMap();
+}
+
+// 日ごとの色
+const DAY_COLORS = ['#4f46e5', '#0ea5e9', '#f97316', '#15803d', '#db2777', '#7c3aed', '#0891b2'];
+
+// プランのスポットを地図にピン表示し、日ごとに線で結ぶ（Leaflet+OpenStreetMap・無料）。
+function renderMap() {
+  const wrap = $('plan-map');
+  if (!wrap) return;
+  if (typeof L === 'undefined' || !currentPlan) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  const allPts = [];
+  currentPlan.days.forEach((day) => {
+    (day.items || []).forEach((it) => {
+      if (it.lat != null && it.lng != null) allPts.push([it.lat, it.lng]);
+    });
+  });
+  if (!allPts.length) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  if (!planMap) {
+    planMap = L.map(wrap, { scrollWheelZoom: false }).setView(allPts[0], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
+      maxZoom: 18,
+    }).addTo(planMap);
+  }
+  planMapLayers.forEach((l) => planMap.removeLayer(l));
+  planMapLayers = [];
+  currentPlan.days.forEach((day, di) => {
+    const color = DAY_COLORS[di % DAY_COLORS.length];
+    const latlngs = [];
+    (day.items || []).forEach((it, idx) => {
+      if (it.lat == null || it.lng == null) return;
+      const icon = L.divIcon({
+        className: 'map-pin',
+        html: `<span style="background:${color}">${idx + 1}</span>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+        popupAnchor: [0, -12],
+      });
+      const m = L.marker([it.lat, it.lng], { icon })
+        .bindPopup(`<b>${esc(it.title)}</b><br>DAY${di + 1}${it.time ? ' ' + esc(it.time) : ''}`)
+        .addTo(planMap);
+      planMapLayers.push(m);
+      latlngs.push([it.lat, it.lng]);
+    });
+    if (latlngs.length >= 2) {
+      const line = L.polyline(latlngs, { color, weight: 3, opacity: 0.6, dashArray: '6 6' }).addTo(planMap);
+      planMapLayers.push(line);
+    }
+  });
+  planMap.fitBounds(allPts, { padding: [30, 30], maxZoom: 14 });
+  // 非表示→表示直後はサイズがずれるので再計算。
+  setTimeout(() => planMap && planMap.invalidateSize(), 60);
 }
 
 // 1日分の中身（見出し＋ルート＋スポット＋移動）を生成。並び替え時の再描画にも使う。
@@ -1539,6 +1658,26 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('collect-btn').addEventListener('click', deepCollect);
   $('share-btn').addEventListener('click', sharePlan);
   $('save-btn').addEventListener('click', saveCurrentPlan);
+  $('print-btn').addEventListener('click', () => window.print());
+  $('wish-plan-btn').addEventListener('click', genFromWishlist);
+  $('refine-btn').addEventListener('click', () => {
+    const v = $('refine-input').value.trim();
+    if (!v) {
+      setStatus('変えたい内容を入力してください（例：グルメ多めに）。', 'err');
+      $('refine-input').focus();
+      return;
+    }
+    refinePlan(v);
+  });
+  $('variant-btn').addEventListener('click', () =>
+    refinePlan('前回とは違う構成・別のスポットや切り口で、新鮮な別案にしてください'),
+  );
+  $('refine-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      $('refine-btn').click();
+    }
+  });
 
   // ハンバーガーメニュー（保存プラン・行った場所）の開閉。
   $('menu-btn').addEventListener('click', openDrawer);

@@ -1633,6 +1633,122 @@ select:focus {
   justify-content: center;
 }
 
+/* map */
+.plan-map {
+  height: 320px;
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  position: relative;
+  z-index: 1;
+}
+.plan-map.hidden {
+  display: none;
+}
+.map-pin span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.74rem;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+}
+
+/* refine box */
+.refine-box {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8faff;
+}
+.refine-box.hidden {
+  display: none;
+}
+.refine-box > label {
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+.refine-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.refine-row input {
+  flex: 1 1 200px;
+}
+.refine-row .btn-secondary {
+  width: auto;
+  margin-top: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.refine-box .btn-ghost {
+  width: 100%;
+}
+#wish-plan-btn {
+  margin: 0 0 10px;
+}
+
+/* ---------- Print (しおり) ---------- */
+@media print {
+  .hero,
+  .form-card,
+  #menu-btn,
+  #drawer,
+  #drawer-overlay,
+  footer,
+  #status,
+  #collect-progress,
+  .no-print,
+  .result-actions,
+  .item-move,
+  .item-foot,
+  .cand-actions,
+  #plan-extra,
+  .eval-note {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  main {
+    margin: 0;
+    padding: 0;
+    max-width: none;
+    gap: 0;
+  }
+  .card {
+    box-shadow: none;
+    border: none;
+    padding: 0;
+  }
+  .day,
+  .item,
+  .info-card,
+  .eval-card,
+  .why-card,
+  .summary-box,
+  .eval-blurb {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  a {
+    color: #000;
+    text-decoration: none;
+  }
+}
+
 /* ---------- Footer ---------- */
 footer {
   text-align: center;

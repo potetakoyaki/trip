@@ -98,6 +98,10 @@ export interface PlanRequest {
   hotelFeatures?: string[];
   /** 省エネモード（軽量AIモデルでNeuron消費を抑える）。 */
   eco?: boolean;
+  /** 必ず含めたいスポット名（行きたいリストから作成時にAIへ優先で組み込ませる）。 */
+  mustInclude?: string[];
+  /** 自然言語の追加リクエスト（例「グルメ多めに」「もっとゆっくり」）。最優先で反映する。 */
+  refine?: string;
 }
 
 export interface PlanItem {
