@@ -1001,7 +1001,8 @@ function renderPlan(data) {
         .join('')}</ul></div>`
     : '';
 
-  let html = `<div class="summary-box">${theme}${summaryText}${highlights}</div>`;
+  const notice = plan.notice ? `<div class="plan-notice">⚠️ ${esc(plan.notice)}</div>` : '';
+  let html = `<div class="summary-box">${notice}${theme}${summaryText}${highlights}</div>`;
   html += rationale + enjoyment;
   if (plan.forecast && plan.forecast.length) html += renderForecast(plan.forecast);
   if (plan.travel) html += renderTravel(plan.travel);

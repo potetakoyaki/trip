@@ -12,7 +12,9 @@ export interface DiscoverResult {
   note?: string;
 }
 
-const MAX_PAGES = 12; // 1エリアあたりに扱う大手サイト/ブログのページ数
+// 1エリアあたりに扱う大手サイト/ブログのページ数。1ページ＝AI抽出1回（Neuron消費）。
+// 無料枠の節約のため控えめにする（じっくり収集は別途ラウンドで追加収集できる）。
+const MAX_PAGES = 6;
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';

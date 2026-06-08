@@ -2,7 +2,7 @@ import type { Env, Plan, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
 import { fetchRakutenHotels } from '../scrape/hotels';
-import { searchEvents, savePlan } from '../db/repository';
+import { searchEvents, savePlan, ensureCoveredTable, isCovered, markCovered } from '../db/repository';
 import { fetchForecast } from '../scrape/weather';
 import { generatePlan } from './planner';
 
@@ -36,22 +36,30 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
 
   let discovered: { total: number; docs: { source: string; url: string }[] } | null = null;
   if (body.autoScrape !== false && body.area && events.length < 6) {
-    try {
-      discovered = await discoverAndScrape(env, {
-        area: body.area,
-        interests: body.interests,
-        keyword: body.keyword,
-      });
-    } catch {
-      discovered = { total: 0, docs: [] };
-    }
-    if (discovered && discovered.total > 0) {
-      events = await searchEvents(env.DB, {
-        area: body.area,
-        from: body.startDate,
-        to: body.endDate,
-        limit: 300,
-      });
+    await ensureCoveredTable(env.DB);
+    // 既に抽出済みのエリアは、AIによる再抽出（＝Neuron消費）を行わない。
+    // 収集済みスポットが少なくても、既存データだけでプラン化を試みる。
+    const alreadyCovered = await isCovered(env.DB, body.area, '');
+    if (!alreadyCovered) {
+      try {
+        discovered = await discoverAndScrape(env, {
+          area: body.area,
+          interests: body.interests,
+          keyword: body.keyword,
+        });
+      } catch {
+        discovered = { total: 0, docs: [] };
+      }
+      if (discovered && discovered.total > 0) {
+        // 新規スポットを取得できたエリアだけ「カバー済み」にして、次回以降の再抽出を防ぐ。
+        await markCovered(env.DB, body.area, '', new Date().toISOString());
+        events = await searchEvents(env.DB, {
+          area: body.area,
+          from: body.startDate,
+          to: body.endDate,
+          limit: 300,
+        });
+      }
     }
   }
 

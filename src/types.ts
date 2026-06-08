@@ -208,4 +208,6 @@ export interface Plan {
   /** 費用内訳。 */
   costBreakdown?: CostBreakdown;
   engine: 'rule' | 'ai';
+  /** 重要なお知らせ（例: AI無料枠切れで簡易プランに切替えた等）。あれば結果上部に表示。 */
+  notice?: string;
 }
