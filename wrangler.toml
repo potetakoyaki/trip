@@ -2,6 +2,10 @@ name = "trip"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 
+# デプロイごとに発行される一時プレビューURL（<hash>-trip.workers.dev）を無効化し、
+# 固定の本番URL（https://trip.potetakoyaki.workers.dev/）だけにする。
+preview_urls = false
+
 # 静的フロントエンド（public/）を配信。/api/* 以外のパスはここから返り、
 # マッチしないリクエストだけが Worker (Hono) に渡る。
 [assets]
