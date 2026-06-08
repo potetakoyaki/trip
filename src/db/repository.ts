@@ -200,6 +200,33 @@ export async function getCollectedAreas(db: D1Database): Promise<string[]> {
   return (results as any[]).map((r) => String(r.area)).filter(Boolean);
 }
 
+// ---- ジオコーディング（緯度経度）のキャッシュ ----
+// AIの推測座標は不正確なので、スポット名から実座標を引いて保存・再利用する。
+// 見つからなかった場合も (0,0) として記録し、無駄な再問い合わせを避ける。
+
+const ENSURE_GEOCODE_SQL = `CREATE TABLE IF NOT EXISTS geocode (
+  query TEXT PRIMARY KEY,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  created_at TEXT NOT NULL
+)`;
+
+export async function ensureGeocodeTable(db: D1Database): Promise<void> {
+  await db.prepare(ENSURE_GEOCODE_SQL).run();
+}
+
+export async function getGeocode(db: D1Database, query: string): Promise<{ lat: number; lng: number } | null> {
+  const r = await db.prepare('SELECT lat, lng FROM geocode WHERE query = ?').bind(query).first<{ lat: number; lng: number }>();
+  return r ? { lat: Number(r.lat), lng: Number(r.lng) } : null;
+}
+
+export async function putGeocode(db: D1Database, query: string, lat: number, lng: number, now: string): Promise<void> {
+  await db
+    .prepare('INSERT OR REPLACE INTO geocode (query, lat, lng, created_at) VALUES (?,?,?,?)')
+    .bind(query, lat, lng, now)
+    .run();
+}
+
 // ---- 行ったことある場所（visited） ----
 
 const ENSURE_VISITED_SQL = `CREATE TABLE IF NOT EXISTS visited (
