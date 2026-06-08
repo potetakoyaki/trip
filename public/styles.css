@@ -1,21 +1,22 @@
 :root {
-  --ink: #0f172a;
-  --ink-soft: #475569;
-  --muted: #94a3b8;
-  --line: #e7ebf2;
-  --bg: #f6f8fc;
+  /* hitotoki 風: クリーム地 × ネイビー × バターイエロー（上品・編集的） */
+  --ink: #2a2c40; /* ネイビーチャコール（文字） */
+  --ink-soft: #5c5e70;
+  --muted: #9d9ca6;
+  --line: #e9e3d6; /* 温かみのある淡いライン */
+  --bg: #f5f1e8; /* クリーム */
   --card: #ffffff;
-  --brand: #4f46e5;
-  --brand-2: #0ea5e9;
-  --brand-ink: #4338ca;
-  --accent: #f97316;
-  --ok: #15803d;
-  --ok-bg: #f0fdf4;
-  --err: #dc2626;
-  --err-bg: #fef2f2;
-  --radius: 16px;
-  --shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.18);
-  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --brand: #2c2e46; /* ネイビー（ボタン・主アクセント） */
+  --brand-2: #3d4060; /* 明るめネイビー（グラデ用） */
+  --brand-ink: #2c2e46; /* リンク・見出しのネイビー */
+  --accent: #f3d678; /* バターイエロー（ハイライト） */
+  --ok: #4f9d74;
+  --ok-bg: #eef7f1;
+  --err: #d9756a;
+  --err-bg: #fbf0ee;
+  --radius: 22px;
+  --shadow: 0 16px 34px -16px rgba(43, 40, 30, 0.22);
+  --shadow-sm: 0 3px 12px rgba(43, 40, 30, 0.09);
 }
 
 * {
@@ -28,8 +29,8 @@ html {
 
 body {
   margin: 0;
-  font-family: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP',
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Meiryo, sans-serif;
+  font-family: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', Meiryo, sans-serif;
   color: var(--ink);
   background: var(--bg);
   line-height: 1.7;
@@ -43,9 +44,9 @@ a {
 /* ---------- Hero ---------- */
 .hero {
   position: relative;
-  background: radial-gradient(120% 120% at 0% 0%, #6366f1 0%, #4f46e5 38%, #0ea5e9 100%);
-  color: #fff;
-  padding: 60px 20px 84px;
+  background: linear-gradient(180deg, #f7e08e 0%, #f3d678 100%);
+  color: var(--ink);
+  padding: 58px 20px 84px;
   overflow: hidden;
   text-align: center;
 }
@@ -65,13 +66,16 @@ a {
 }
 .hero-badge {
   display: inline-block;
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(44, 46, 70, 0.1);
+  border: 1px solid rgba(44, 46, 70, 0.18);
+  color: var(--ink);
   padding: 6px 16px;
   border-radius: 999px;
   font-weight: 700;
   font-size: 0.9rem;
-  backdrop-filter: blur(6px);
+}
+.hero h1 {
+  font-weight: 900;
 }
 .hero h1 {
   margin: 18px 0 10px;
@@ -133,7 +137,7 @@ main {
   white-space: nowrap;
 }
 .btn-ghost:hover {
-  background: #f6f8ff;
+  background: #faf6ea;
 }
 
 /* ---------- Form ---------- */
@@ -178,7 +182,7 @@ select:focus {
   outline: none;
   border-color: var(--brand);
   background: #fff;
-  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.12);
+  box-shadow: 0 0 0 4px rgba(44, 46, 70, 0.12);
 }
 
 /* interest chips */
@@ -208,7 +212,7 @@ select:focus {
   background: linear-gradient(135deg, var(--brand), var(--brand-2));
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 6px 14px -6px rgba(79, 70, 229, 0.6);
+  box-shadow: 0 6px 14px -6px rgba(44, 46, 70, 0.6);
 }
 
 /* options / switches */
@@ -268,12 +272,12 @@ select:focus {
   color: #fff;
   cursor: pointer;
   background: linear-gradient(135deg, var(--brand), var(--brand-2));
-  box-shadow: 0 12px 24px -10px rgba(79, 70, 229, 0.7);
+  box-shadow: 0 12px 24px -10px rgba(44, 46, 70, 0.45);
   transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 28px -10px rgba(79, 70, 229, 0.7);
+  box-shadow: 0 16px 28px -10px rgba(44, 46, 70, 0.5);
 }
 .btn-primary:active {
   transform: translateY(0);
@@ -315,7 +319,7 @@ select:focus {
   transition: background 0.12s ease;
 }
 .btn-secondary:hover {
-  background: #f6f8ff;
+  background: #faf6ea;
 }
 .btn-secondary:disabled {
   opacity: 0.6;
@@ -408,7 +412,7 @@ select:focus {
   height: 13px;
   margin-right: 7px;
   vertical-align: -2px;
-  border: 2px solid rgba(79, 70, 229, 0.3);
+  border: 2px solid rgba(44, 46, 70, 0.3);
   border-top-color: var(--brand);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -454,8 +458,8 @@ select:focus {
 
 /* ---------- Plan summary ---------- */
 .summary-box {
-  background: linear-gradient(135deg, #eef2ff, #ecfeff);
-  border: 1px solid #e0e7ff;
+  background: linear-gradient(135deg, #faf4e1, #fbf6e6);
+  border: 1px solid #ece4d3;
   border-radius: 14px;
   padding: 18px 20px;
   margin-bottom: 18px;
@@ -519,7 +523,7 @@ select:focus {
   gap: 8px;
 }
 .pill {
-  background: #eef2ff;
+  background: #faf4e1;
   color: var(--brand-ink);
   border-radius: 999px;
   padding: 4px 12px;
@@ -592,7 +596,7 @@ select:focus {
 }
 .hotel.selected {
   border-color: var(--brand);
-  background: #f5f3ff;
+  background: #faf4e1;
 }
 .hotel-pick {
   display: inline-flex;
@@ -616,14 +620,14 @@ select:focus {
   padding: 9px;
   border: 1px dashed var(--line);
   border-radius: 10px;
-  background: #fafbff;
+  background: #fcf9f0;
   color: var(--brand-ink);
   font-size: 0.84rem;
   font-weight: 700;
   cursor: pointer;
 }
 .hotel-more:hover {
-  background: #f5f3ff;
+  background: #faf4e1;
 }
 .hotel-top {
   display: flex;
@@ -725,7 +729,7 @@ select:focus {
   font-size: 0.8rem;
   line-height: 1.1;
   text-align: center;
-  box-shadow: 0 8px 16px -8px rgba(79, 70, 229, 0.7);
+  box-shadow: 0 8px 16px -8px rgba(44, 46, 70, 0.7);
 }
 .day-num small {
   display: block;
@@ -856,7 +860,7 @@ select:focus {
   white-space: nowrap;
 }
 .why b {
-  background: #eef2ff;
+  background: #faf4e1;
   color: var(--brand-ink);
 }
 .tips b {
@@ -1035,7 +1039,7 @@ select:focus {
   font-weight: 700;
   color: var(--brand-ink);
   text-decoration: none;
-  background: #eef2ff;
+  background: #faf4e1;
   padding: 5px 12px;
   border-radius: 999px;
 }
@@ -1471,7 +1475,7 @@ select:focus {
 }
 .cat-count {
   flex: 0 0 auto;
-  background: #eef2ff;
+  background: #faf4e1;
   color: var(--brand-ink);
   border-radius: 999px;
   padding: 1px 10px;
@@ -1506,7 +1510,7 @@ select:focus {
   cursor: pointer;
 }
 .cand-add:hover {
-  background: #eef2ff;
+  background: #faf4e1;
 }
 
 /* reorder buttons on plan items */
@@ -1545,7 +1549,7 @@ select:focus {
 
 /* selection rationale / enjoyment */
 .why-card {
-  border: 1px solid #e0e7ff;
+  border: 1px solid #ece4d3;
   background: #f5f7ff;
   border-radius: 14px;
   padding: 14px 18px;
@@ -1857,7 +1861,7 @@ footer {
   display: none;
 }
 .recollect-btn:hover {
-  background: #f5f3ff;
+  background: #faf4e1;
 }
 .recollect-btn:active {
   transform: scale(0.98);
@@ -1894,7 +1898,7 @@ footer {
   color: var(--ink);
 }
 .suggest li:hover {
-  background: #eef2ff;
+  background: #faf4e1;
   color: var(--brand-ink);
 }
 
