@@ -5,6 +5,8 @@ import { enumerateDates, generateRulePlan } from './rule-based';
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 // 通常（デフォルト）の軽量モデル（Neuron消費が小さい）。
 const ECO_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+/** 診断（/api/diag/ai）で疎通確認するモデル一覧（軽量→高性能の順）。 */
+export const AI_MODELS = [ECO_MODEL, MODEL];
 const PER_DAY: Record<NonNullable<PlanRequest['pace']>, number> = { relaxed: 2, normal: 3, packed: 4 };
 
 /** AIの無料枠（トークン/ニューロン）切れ・利用上限を表すエラー。これはフォールバックせず上位へ伝える。 */
@@ -17,12 +19,28 @@ export class AiQuotaError extends Error {
   }
 }
 
-/** AI呼び出しのエラーが「無料枠切れ・利用上限・レート超過」かを判定する。 */
-function isAiLimitError(e: unknown): boolean {
-  const msg = (e instanceof Error ? e.message : String(e ?? '')).toLowerCase();
-  return /neuron|quota|exceed|too many requests|\b429\b|rate.?limit|limit reached|out of (credit|capacity)|insufficient|allocation|daily limit|capacity|\b3040\b/.test(
-    msg,
-  );
+function aiErrText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e ?? '');
+}
+
+/**
+ * AI呼び出しのエラー種別を見分ける。
+ * - 'quota': 本当の無料枠切れ・クレジット切れ・1日の上限（別モデルでも回復しない）。
+ * - 'busy' : 一時的な混雑・容量超過・レート制限・ルーティング/5xx（再試行で回復しうる。アカウント枠とは無関係）。
+ * - 'other': その他（パラメータ非対応など。別モデルでの再試行に価値あり）。
+ *
+ * ※以前は 'capacity'（容量超過）や 3040（モデル不達）まで枠切れ扱いにしていたため、
+ *   使用ニューロンが0でも「枠の上限に達した」と誤表示していた。ここで明確に分離する。
+ */
+function classifyAiError(e: unknown): 'quota' | 'busy' | 'other' {
+  const msg = aiErrText(e).toLowerCase();
+  if (/neuron|quota|out of credit|insufficient|daily limit|limit reached|allocation/.test(msg)) {
+    return 'quota';
+  }
+  if (/capacity|overload|temporar|unavailable|no route|too many requests|\b429\b|rate.?limit|\b50[0234]\b|\b3040\b|try again/.test(msg)) {
+    return 'busy';
+  }
+  return 'other';
 }
 
 const SCHEMA = {
@@ -174,11 +192,12 @@ export async function generateAiPlan(
   ].join('\n');
 
   // じっくりモードでは高性能モデルを使う。通常は軽量モデルでNeuron消費を抑える。
-  const model = req.thorough ? MODEL : ECO_MODEL;
+  const primary = req.thorough ? MODEL : ECO_MODEL;
+  const fallback = primary === MODEL ? ECO_MODEL : MODEL;
 
-  let res: { response?: unknown };
-  try {
-    res = (await env.AI.run(model, {
+  const ai = env.AI; // 上の guard で defined。nested closure 内でも参照できるよう束ねる。
+  const runModel = async (m: string): Promise<{ response?: unknown }> =>
+    (await ai.run(m, {
       messages: [
         { role: 'system', content: sys },
         { role: 'user', content: user },
@@ -186,15 +205,32 @@ export async function generateAiPlan(
       max_tokens: 3000,
       response_format: { type: 'json_schema', json_schema: SCHEMA },
     })) as { response?: unknown };
+
+  let res: { response?: unknown };
+  try {
+    res = await runModel(primary);
   } catch (e) {
-    // 無料枠（トークン/ニューロン）切れ・利用上限のときは、弱いルールベースに退避せず
-    // 明確なエラーとして上位（ジョブ）へ返す。
-    if (isAiLimitError(e)) throw new AiQuotaError();
-    // それ以外のAI APIエラーも隠さず、プラン作成の失敗として上位へ返す。
-    throw new Error(
-      'AIでのプラン生成に失敗しました（時間をおいて再度お試しください）。詳細: ' +
-        (e instanceof Error ? e.message : String(e)),
-    );
+    const kind = classifyAiError(e);
+    // 本当の枠切れ・上限は別モデルでも回復しないので、弱いルールベースに退避せず即エラー。
+    if (kind === 'quota') throw new AiQuotaError();
+    // 混雑・モデル固有のエラーは、もう一方のモデルで一度だけ再試行する
+    // （例: 軽量モデルが応答できない/構造化出力に未対応でも高性能モデルなら通る）。
+    try {
+      res = await runModel(fallback);
+    } catch (e2) {
+      const kind2 = classifyAiError(e2);
+      if (kind2 === 'quota') throw new AiQuotaError();
+      if (kind2 === 'busy') {
+        throw new Error(
+          'AIが混雑しているようです（一時的な容量超過の可能性で、無料枠の消費とは別です）。少し待ってから再度お試しください。詳細: ' +
+            aiErrText(e2),
+        );
+      }
+      // 原因を隠さず、本当のエラー内容を添えて上位（ジョブ）へ返す。
+      throw new Error(
+        'AIでのプラン生成に失敗しました（時間をおいて再度お試しください）。詳細: ' + aiErrText(e2),
+      );
+    }
   }
 
   try {

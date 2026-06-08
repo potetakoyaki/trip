@@ -41,9 +41,39 @@ import {
   updateSource,
 } from '../db/repository';
 import { extractSpotsDiag } from '../scrape/ai-extract';
+import { AI_MODELS } from '../planner/ai';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
+
+// AIバインディングの疎通確認。つながっているか・どのモデルが応答するかを返す。
+// 「枠の上限」表示が出るのに使用ニューロンが0のとき、ここで本当の原因を確認できる。
+// （構造化出力の対応有無に左右されないよう、ここでは素のプロンプトで試す。）
+api.get('/diag/ai', async (c) => {
+  const env = c.env;
+  if (!env.AI) {
+    return c.json({
+      ok: false,
+      bound: false,
+      note: 'AIバインディング(env.AI)が無効です。wrangler.toml の [ai] と再デプロイを確認してください。',
+    });
+  }
+  const results: Array<Record<string, unknown>> = [];
+  for (const model of AI_MODELS) {
+    const t0 = Date.now();
+    try {
+      const r = (await env.AI.run(model, {
+        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+        max_tokens: 8,
+      })) as { response?: unknown };
+      const sample = typeof r?.response === 'string' ? r.response.trim().slice(0, 60) : (r?.response ?? null);
+      results.push({ model, ok: true, ms: Date.now() - t0, sample });
+    } catch (e) {
+      results.push({ model, ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return c.json({ ok: results.some((r) => r.ok), bound: true, results });
+});
 
 /** リクエストURLからオリジン（https://host）を取り出す。楽天新APIのOrigin/Referer用。 */
 function reqOrigin(reqUrl: string): string | undefined {
