@@ -97,6 +97,7 @@ export async function createPlan(
       checkinDate: body.startDate,
       checkoutDate: body.endDate,
       prefecture: areaPref,
+      adults: body.adults,
     });
   } catch {
     realHotels = [];

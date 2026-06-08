@@ -761,6 +761,7 @@ function buildPlanBody() {
     vibe: $('vibe').value || undefined,
     origin: $('origin').value.trim() || undefined,
     transport: $('transport').value || undefined,
+    adults: $('adults') ? Number($('adults').value) : undefined,
     keyword: $('keyword').value.trim() || undefined,
     hotelFeatures: getHotelFeatures(),
     thorough: $('thorough').checked,

@@ -235,6 +235,7 @@ function validatePlanRequest(body: any): { ok: true; req: PlanRequest } | { ok: 
     vibe: str(body.vibe, 40),
     origin: str(body.origin, 80),
     transport: str(body.transport, 40),
+    adults: Number.isFinite(Number(body.adults)) ? Math.max(1, Math.min(20, Math.round(Number(body.adults)))) : undefined,
     keyword: str(body.keyword, 80),
     hotelFeatures: strArr(body.hotelFeatures),
     autoScrape: body.autoScrape === false ? false : true,

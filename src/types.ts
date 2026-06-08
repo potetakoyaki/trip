@@ -100,6 +100,8 @@ export interface PlanRequest {
   origin?: string;
   /** 移動手段（電車 / 新幹線 / 車 / 飛行機 / バス）。 */
   transport?: string;
+  /** 大人の人数（ホテルの空室検索の occupancy に使う。既定2）。 */
+  adults?: number;
   /** やりたいこと等のフリーワード（例: 花火 / 紅葉 / 美術館）。 */
   keyword?: string;
   /** ホテルの希望条件（例: 温泉 / 露天風呂 / 夕食付き / リゾート）。 */
