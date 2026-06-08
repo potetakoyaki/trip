@@ -71,17 +71,32 @@ api.get('/diag/ai', async (c) => {
     }
   }
 
-  // Gemini（APIキーが設定されていれば疎通確認）。Cloudflareの枠とは独立。
+  // Gemini（APIキーがあれば疎通確認）。Cloudflareの枠とは独立。
+  // 無料枠の配分はモデルごとに異なるため、候補モデルを順に試して「どれが通るか」を示す。
   if (geminiEnabled(env)) {
-    const t0 = Date.now();
-    try {
-      const out = await geminiGenerate(env, 'You are a test endpoint.', 'Reply with exactly: OK', {
-        json: false,
-        maxOutputTokens: 8,
-      });
-      results.push({ provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-2.0-flash', ok: true, ms: Date.now() - t0, sample: out.trim().slice(0, 60) });
-    } catch (e) {
-      results.push({ provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-2.0-flash', ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+    const candidates = [
+      (env.GEMINI_MODEL || '').trim() || 'gemini-2.0-flash',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-8b',
+    ];
+    const seen = new Set<string>();
+    for (const model of candidates) {
+      if (!model || seen.has(model)) continue;
+      seen.add(model);
+      const t0 = Date.now();
+      try {
+        const out = await geminiGenerate(env, 'You are a test endpoint.', 'Reply with exactly: OK', {
+          json: false,
+          maxOutputTokens: 8,
+          model,
+          maxAttempts: 1, // 診断は素早く判定したいので再試行しない
+        });
+        results.push({ provider: 'gemini', model, ok: true, ms: Date.now() - t0, sample: out.trim().slice(0, 60) });
+      } catch (e) {
+        results.push({ provider: 'gemini', model, ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   }
 

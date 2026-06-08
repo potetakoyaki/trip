@@ -18,11 +18,17 @@ export async function geminiGenerate(
   env: Env,
   systemText: string,
   userText: string,
-  opts: { json?: boolean; maxOutputTokens?: number; temperature?: number } = {},
+  opts: {
+    json?: boolean;
+    maxOutputTokens?: number;
+    temperature?: number;
+    model?: string;
+    maxAttempts?: number;
+  } = {},
 ): Promise<string> {
   const key = (env.GEMINI_API_KEY ?? '').trim();
   if (!key) throw new Error('GEMINI_API_KEY が未設定です');
-  const model = (env.GEMINI_MODEL ?? '').trim() || DEFAULT_GEMINI_MODEL;
+  const model = (opts.model ?? '').trim() || (env.GEMINI_MODEL ?? '').trim() || DEFAULT_GEMINI_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model,
   )}:generateContent?key=${encodeURIComponent(key)}`;
@@ -42,7 +48,7 @@ export async function geminiGenerate(
   // 429（レート/クォータ超過）・503（一時的）はバックオフして再試行する。
   // 無料枠はRPM（毎分リクエスト数）が低く、抽出の並列呼び出しで一時的に超えやすいため。
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const maxAttempts = 3;
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 3);
   let lastErr = '';
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const res = await fetch(url, {
@@ -61,7 +67,7 @@ export async function geminiGenerate(
       return text;
     }
     const t = await res.text().catch(() => '');
-    lastErr = `Gemini APIエラー (${res.status}): ${t.slice(0, 300)}`;
+    lastErr = `Gemini APIエラー (${res.status}): ${t.slice(0, 500)}`;
     if ((res.status === 429 || res.status === 503) && attempt < maxAttempts) {
       await sleep(900 * attempt); // 0.9s, 1.8s
       continue;
