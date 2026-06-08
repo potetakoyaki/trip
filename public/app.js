@@ -376,7 +376,7 @@ function fillForm(req) {
   document.querySelectorAll('.hotel-feat').forEach((c) => {
     c.checked = feats.has(c.value);
   });
-  $('eco').checked = !!req.eco;
+  $('thorough').checked = !!req.thorough;
 }
 
 async function sharePlan() {
@@ -696,7 +696,7 @@ function buildPlanBody() {
     transport: $('transport').value || undefined,
     keyword: $('keyword').value.trim() || undefined,
     hotelFeatures: getHotelFeatures(),
-    eco: $('eco').checked,
+    thorough: $('thorough').checked,
   };
   // 行きたいリスト由来の必須スポット / 自然言語の調整指示（いずれも1回限り）。
   if (pendingMustInclude && pendingMustInclude.length) body.mustInclude = pendingMustInclude;

@@ -103,7 +103,7 @@ function validatePlanRequest(body: any): { ok: true; req: PlanRequest } | { ok: 
     keyword: str(body.keyword, 80),
     hotelFeatures: strArr(body.hotelFeatures),
     autoScrape: body.autoScrape === false ? false : true,
-    eco: body.eco === true,
+    thorough: body.thorough === true,
     mustInclude: Array.isArray(body.mustInclude)
       ? body.mustInclude
           .filter((x: unknown) => typeof x === 'string')

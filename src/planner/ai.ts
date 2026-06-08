@@ -1,8 +1,9 @@
 import type { Env, EventRecord, Plan, PlanDay, PlanItem, PlanRequest } from '../types';
 import { enumerateDates, generateRulePlan } from './rule-based';
 
+// じっくりモード用の高性能モデル。
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
-// 省エネモード用の軽量モデル（Neuron消費が小さい）。
+// 通常（デフォルト）の軽量モデル（Neuron消費が小さい）。
 const ECO_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 const PER_DAY: Record<NonNullable<PlanRequest['pace']>, number> = { relaxed: 2, normal: 3, packed: 4 };
 
@@ -10,7 +11,7 @@ const PER_DAY: Record<NonNullable<PlanRequest['pace']>, number> = { relaxed: 2, 
 export class AiQuotaError extends Error {
   constructor() {
     super(
-      'AIが利用できませんでした（本日の無料利用枠の上限に達したか、混雑の可能性があります）。日付が変わると枠は回復します。時間をおいて再度お試しください。省エネモードにすると消費を抑えられます。',
+      'AIが利用できませんでした（本日の無料利用枠の上限に達したか、混雑の可能性があります）。日付が変わると枠は回復します。時間をおいて再度お試しください。じっくりモードをオフにすると消費を抑えられます。',
     );
     this.name = 'AiQuotaError';
   }
@@ -172,8 +173,8 @@ export async function generateAiPlan(
     '- 各日の項目は移動効率が良い順（地理的に近い場所が連続するよう）に並べ、time もその順で矛盾なく付ける。JSONのみ出力。',
   ].join('\n');
 
-  // 省エネモードでは軽量モデルを使い、Neuron消費を抑える。
-  const model = req.eco ? ECO_MODEL : MODEL;
+  // じっくりモードでは高性能モデルを使う。通常は軽量モデルでNeuron消費を抑える。
+  const model = req.thorough ? MODEL : ECO_MODEL;
 
   let res: { response?: unknown };
   try {
