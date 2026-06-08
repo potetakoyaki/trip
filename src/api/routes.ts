@@ -47,6 +47,12 @@ import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
 
+// APIレスポンスはキャッシュさせない（診断・進捗ポーリング等が古い結果を返さないように）。
+api.use('*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+});
+
 // AIバインディングの疎通確認。つながっているか・どのモデルが応答するかを返す。
 // 「枠の上限」表示が出るのに使用ニューロンが0のとき、ここで本当の原因を確認できる。
 // （構造化出力の対応有無に左右されないよう、ここでは素のプロンプトで試す。）
