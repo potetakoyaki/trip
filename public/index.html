@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Trip Planner — 旅行プランメーカー</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="/styles.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
   </head>
   <body>
     <button id="menu-btn" class="menu-btn" aria-label="メニュー">☰</button>
@@ -29,6 +31,7 @@
         <summary>⭐ 行ってみたい<span class="sec-count" id="wish-count"></span></summary>
         <div class="drawer-sec-body">
           <p class="sec-hint">↑↓ で行きたい順に並び替えできます。</p>
+          <button type="button" id="wish-plan-btn" class="btn-secondary">⭐ 行きたいリストでプランを作成</button>
           <div id="wishlist-list" class="wishlist-list"></div>
         </div>
       </details>
@@ -187,12 +190,24 @@
           <h2 class="section-title">あなたの旅行プラン</h2>
           <div class="result-actions">
             <button type="button" id="save-btn" class="btn-ghost hidden">💾 このプランを保存</button>
+            <button type="button" id="print-btn" class="btn-ghost hidden">🖨 印刷・PDF</button>
             <button type="button" id="share-btn" class="btn-ghost hidden">🔗 リンクをコピー</button>
           </div>
         </div>
         <div id="plan-summary"></div>
         <div id="plan-eval"></div>
+        <div id="plan-map" class="plan-map hidden no-print"></div>
         <div id="plan-days" class="timeline"></div>
+
+        <div id="refine-box" class="refine-box hidden no-print">
+          <label for="refine-input">🔁 AIに調整を頼む（例：グルメ多めに / もっとゆっくり / 2日目は温泉中心に）</label>
+          <div class="refine-row">
+            <input type="text" id="refine-input" placeholder="変えたいことを入力" autocomplete="off" />
+            <button type="button" id="refine-btn" class="btn-secondary">この内容で作り直す</button>
+          </div>
+          <button type="button" id="variant-btn" class="btn-ghost">🔀 別案を出す</button>
+        </div>
+
         <div id="plan-extra"></div>
       </section>
     </main>

@@ -104,6 +104,14 @@ function validatePlanRequest(body: any): { ok: true; req: PlanRequest } | { ok: 
     hotelFeatures: strArr(body.hotelFeatures),
     autoScrape: body.autoScrape === false ? false : true,
     eco: body.eco === true,
+    mustInclude: Array.isArray(body.mustInclude)
+      ? body.mustInclude
+          .filter((x: unknown) => typeof x === 'string')
+          .map((x: string) => x.trim().slice(0, 120))
+          .filter(Boolean)
+          .slice(0, 12)
+      : undefined,
+    refine: str(body.refine, 200),
     engine: body.engine === 'rule' ? 'rule' : undefined,
   };
   return { ok: true, req };
