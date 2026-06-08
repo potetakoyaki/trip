@@ -1,7 +1,7 @@
 import type { Env, Plan, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
-import { geocodePlanItems } from '../scrape/geocode';
+import { geocodePlanItems, geocodeQuery, haversineKm } from '../scrape/geocode';
 import { fetchRakutenHotels } from '../scrape/hotels';
 import { searchEvents, savePlan, ensureCoveredTable, isCovered, markCovered } from '../db/repository';
 import { fetchForecast } from '../scrape/weather';
@@ -115,6 +115,47 @@ export async function createPlan(
     await geocodePlanItems(env, plan.days.flatMap((d) => d.items), body.area);
   } catch {
     /* 座標取得の失敗はプラン全体を止めない */
+  }
+
+  // 出発地が指定されていれば、実座標から交通の距離・所要・概算費用を計算して上書きする
+  // （AIの幻覚で「茨木市→下関 80km」のような誤りを防ぐ）。AIがtravelを省いていても作る。
+  if (body.origin) {
+    try {
+      const origin = await geocodeQuery(env, body.origin);
+      const items = plan.days.flatMap((d) => d.items);
+      const destItem = items.find((it) => it.lat != null && it.lng != null);
+      const dest =
+        destItem && destItem.lat != null && destItem.lng != null
+          ? { lat: destItem.lat, lng: destItem.lng }
+          : await geocodeQuery(env, body.area ?? '');
+      if (origin && dest) {
+        const straight = haversineKm(origin, dest);
+        const mode = plan.travel?.mode || body.transport || '';
+        const isWalk = /徒歩|歩/.test(mode);
+        const isCar = /車|ドライブ|自動車|car/i.test(mode);
+        const roadKm = Math.max(1, Math.round(straight * (isWalk ? 1.15 : 1.3)));
+        const speed = isWalk ? 4.5 : isCar ? 65 : 85; // km/h（車=一般+高速の平均、鉄道=乗換込みでざっくり）
+        const minutes = Math.max(1, Math.round((roadKm / speed) * 60));
+        const fmtDur = (m: number) =>
+          m < 60 ? `約${m}分` : m % 60 === 0 ? `約${m / 60}時間` : `約${Math.floor(m / 60)}時間${m % 60}分`;
+        const cost = isWalk ? 0 : isCar ? Math.round(roadKm * 2 * 22) : Math.round(straight * 2 * 28);
+        plan.travel = {
+          from: body.origin,
+          to: body.area,
+          mode: plan.travel?.mode || body.transport,
+          distance: `約${roadKm}km`,
+          duration: fmtDur(minutes),
+          costRoundTrip: cost,
+          note: plan.travel?.note,
+        };
+        if (plan.costBreakdown) {
+          plan.costBreakdown.transport = cost;
+          plan.costBreakdown.grandTotal = plan.costBreakdown.stayTotal + cost;
+        }
+      }
+    } catch {
+      /* 交通の再計算に失敗してもAIの値のまま進める */
+    }
   }
 
   await report('天気を取得して仕上げ中…', 95);

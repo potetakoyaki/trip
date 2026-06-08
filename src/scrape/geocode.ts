@@ -1,8 +1,52 @@
 import type { Env, PlanItem } from '../types';
 import { ensureGeocodeTable, getGeocode, putGeocode } from '../db/repository';
 
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 1件のクエリ（地名/施設名＋エリアヒント）を緯度経度に変換する。
+ * DBキャッシュ優先、未取得なら Nominatim(1req/秒)。見つからなければ null。
+ */
+export async function geocodeQuery(env: Env, name: string, areaHint?: string): Promise<LatLng | null> {
+  const n = (name || '').trim();
+  if (!n) return null;
+  await ensureGeocodeTable(env.DB);
+  const query = [n, (areaHint || '').trim(), '日本'].filter(Boolean).join(' ');
+
+  const cached = await getGeocode(env.DB, query);
+  if (cached) return cached.lat === 0 && cached.lng === 0 ? null : cached;
+
+  let lat = 0;
+  let lng = 0;
+  try {
+    const ua = env.USER_AGENT || 'TripPlannerBot/0.1 (personal use)';
+    const url = `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1&accept-language=ja&countrycodes=jp`;
+    const res = await fetch(url, { headers: { 'User-Agent': ua, Accept: 'application/json' } });
+    if (res.ok) {
+      const arr = (await res.json()) as Array<{ lat?: string; lon?: string }>;
+      const hit = Array.isArray(arr) ? arr[0] : undefined;
+      if (hit?.lat && hit?.lon) {
+        const la = Number(hit.lat);
+        const lo = Number(hit.lon);
+        if (Number.isFinite(la) && Number.isFinite(lo)) {
+          lat = la;
+          lng = lo;
+        }
+      }
+    }
+  } catch {
+    /* 失敗時は (0,0) として記録 */
+  }
+  await putGeocode(env.DB, query, lat, lng, new Date().toISOString());
+  await sleep(1100); // Nominatim 利用ポリシー: 最大 1req/秒
+  return lat !== 0 || lng !== 0 ? { lat, lng } : null;
+}
 
 /**
  * プランの各スポットに、名称から引いた実際の緯度経度を付与する（地図用）。
@@ -11,54 +55,22 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * ベストエフォート：取得できないスポットはAI座標のまま残す。
  */
 export async function geocodePlanItems(env: Env, items: PlanItem[], areaHint?: string): Promise<void> {
-  if (!items.length) return;
-  await ensureGeocodeTable(env.DB);
-  const ua = env.USER_AGENT || 'TripPlannerBot/0.1 (personal use)';
-  const now = () => new Date().toISOString();
-
   for (const item of items) {
-    const name = (item.title || '').trim();
-    if (!name) continue;
-    const hint = (item.location || areaHint || '').trim();
-    const query = [name, hint, '日本'].filter(Boolean).join(' ');
-
-    // 1) キャッシュ
-    const cached = await getGeocode(env.DB, query);
-    if (cached) {
-      if (!(cached.lat === 0 && cached.lng === 0)) {
-        item.lat = cached.lat;
-        item.lng = cached.lng;
-      }
-      continue;
+    const ll = await geocodeQuery(env, item.title || '', item.location || areaHint);
+    if (ll) {
+      item.lat = ll.lat;
+      item.lng = ll.lng;
     }
-
-    // 2) Nominatim（キャッシュミスのみ。1req/秒を守る）
-    let lat = 0;
-    let lng = 0;
-    try {
-      const url = `${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1&accept-language=ja&countrycodes=jp`;
-      const res = await fetch(url, { headers: { 'User-Agent': ua, Accept: 'application/json' } });
-      if (res.ok) {
-        const arr = (await res.json()) as Array<{ lat?: string; lon?: string }>;
-        const hit = Array.isArray(arr) ? arr[0] : undefined;
-        if (hit?.lat && hit?.lon) {
-          const la = Number(hit.lat);
-          const lo = Number(hit.lon);
-          if (Number.isFinite(la) && Number.isFinite(lo)) {
-            lat = la;
-            lng = lo;
-          }
-        }
-      }
-    } catch {
-      /* 失敗時は (0,0) として記録し、AI座標を温存 */
-    }
-
-    await putGeocode(env.DB, query, lat, lng, now());
-    if (lat !== 0 || lng !== 0) {
-      item.lat = lat;
-      item.lng = lng;
-    }
-    await sleep(1100); // Nominatim 利用ポリシー: 最大 1req/秒
   }
+}
+
+/** 2地点の直線距離(km)。ハバーサイン。 */
+export function haversineKm(a: LatLng, b: LatLng): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const la1 = (a.lat * Math.PI) / 180;
+  const la2 = (b.lat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }

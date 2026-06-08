@@ -10,6 +10,10 @@ let currentArea = '';
 let currentTransport = '';
 let currentPlan = null;
 let currentCandidates = [];
+// ホテル選択→滞在費の連動用。
+let planHotels = [];
+let planCostParts = null; // { nights, food, activities, transport, budget }
+let selectedHotelIdx = 0;
 let pendingMustInclude = null; // 行きたいリストから作成する際の必須スポット
 let pendingRefine = null; // 自然言語の調整指示（作り直し/別案）
 let planMap = null; // Leaflet マップ
@@ -505,6 +509,7 @@ function hideCancel() {
 
 // 進行中のバックグラウンド処理をキャンセルする。
 async function cancelOp() {
+  if (!confirm('本当にキャンセルしますか？\n進行中の作成・収集を中止します。')) return;
   const op = activeOp;
   bgGen++; // 進行中のポーリングを無効化
   if (pollTimer) {
@@ -986,15 +991,26 @@ function renderPlan(data) {
         .join('')}</ul></div>`
     : '';
 
+  // ホテル選択→滞在費の連動用に、費用の各内訳とホテル一覧を保持する。
+  planHotels = plan.hotels && plan.hotels.length ? plan.hotels : [];
+  selectedHotelIdx = planHotels.findIndex((h) => h.nightlyPrice != null);
+  if (selectedHotelIdx < 0) selectedHotelIdx = 0;
+  const cb = plan.costBreakdown;
+  planCostParts = cb
+    ? { nights: cb.nights, food: cb.food, activities: cb.activities, transport: cb.transport, budget: cb.budget }
+    : null;
+
   const notice = plan.notice ? `<div class="plan-notice">⚠️ ${esc(plan.notice)}</div>` : '';
   let html = `<div class="summary-box">${notice}${theme}${summaryText}${highlights}</div>`;
   html += enjoyment;
   if (plan.forecast && plan.forecast.length) html += renderForecast(plan.forecast);
   if (plan.travel) html += renderTravel(plan.travel);
-  if (plan.costBreakdown) html += renderCost(plan.costBreakdown);
-  if (plan.hotels && plan.hotels.length) html += renderHotels(plan.hotels);
+  // ホテルを先に出し、選んだ宿で下の費用カードが更新されるようにする。
+  if (planHotels.length) html += renderHotels(planHotels);
+  if (planCostParts) html += renderCostCard();
   html += advice;
   $('plan-summary').innerHTML = html;
+  wireHotelSelection();
 
   renderPlanDays();
   renderCandidates(data.candidates);
@@ -1464,14 +1480,41 @@ function renderTravel(t) {
   </div>`;
 }
 
+// 選択中ホテルの料金を反映した費用カードを組み立てる。
+function renderCostCard() {
+  const p = planCostParts;
+  if (!p) return '';
+  const hotel = planHotels[selectedHotelIdx];
+  const unknown = !!(hotel && hotel.nightlyPrice == null);
+  const nightly = hotel && hotel.nightlyPrice != null ? hotel.nightlyPrice : 0;
+  const nights = p.nights || 0;
+  const hotelTotal = nightly * nights;
+  const stayTotal = hotelTotal + (p.food || 0) + (p.activities || 0);
+  const transport = p.transport || 0;
+  const grandTotal = stayTotal + transport;
+  const withinBudget = p.budget != null ? stayTotal <= p.budget : undefined;
+  return renderCost({
+    nights,
+    hotel: hotelTotal,
+    hotelName: hotel ? hotel.name : undefined,
+    hotelUnknown: unknown,
+    food: p.food || 0,
+    activities: p.activities || 0,
+    stayTotal,
+    transport,
+    grandTotal,
+    budget: p.budget,
+    withinBudget,
+  });
+}
+
 function renderCost(c) {
-  const rows = [
-    [`ホテル${c.nights ? `（${c.nights}泊）` : ''}`, c.hotel],
-    ['食事', c.food],
-    ['観光・体験', c.activities],
-  ]
-    .map(([l, v]) => `<div class="cost-row"><span>${l}</span><span>${yen(v)}</span></div>`)
-    .join('');
+  const hotelLabel = `ホテル${c.nights ? `（${c.nights}泊）` : ''}${c.hotelName ? `・${esc(c.hotelName)}` : ''}`;
+  const hotelVal = c.hotelUnknown ? '料金不明' : yen(c.hotel);
+  const rows =
+    `<div class="cost-row"><span>${hotelLabel}</span><span>${hotelVal}</span></div>` +
+    `<div class="cost-row"><span>食事</span><span>${yen(c.food)}</span></div>` +
+    `<div class="cost-row"><span>観光・体験</span><span>${yen(c.activities)}</span></div>`;
   const stay = `<div class="cost-row total"><span>滞在費合計</span><b>${yen(c.stayTotal)}</b></div>`;
   const transport = c.transport
     ? `<div class="cost-row"><span>交通（往復）</span><span>${yen(c.transport)}</span></div>`
@@ -1484,17 +1527,17 @@ function renderCost(c) {
       ? `<div class="budget ok">✓ 予算内（滞在費 ${yen(c.stayTotal)} / 予算 ${yen(c.budget)}）</div>`
       : `<div class="budget over">⚠ 予算オーバー +${yen(diff)}（滞在費 ${yen(c.stayTotal)} / 予算 ${yen(c.budget)}）</div>`;
   }
-  return `<div class="info-card">
+  return `<div class="info-card" id="cost-card">
     <div class="info-h">💰 費用の目安（1人）</div>
     ${rows}${stay}${transport}${grand}${budget}
-    <p class="info-note">※AIによる概算です。実際の料金は各予約サイト等でご確認ください。</p>
+    <p class="info-note">※選んだ宿泊先で滞在費が変わります。AIによる概算で、実際の料金は各予約サイト等でご確認ください。</p>
   </div>`;
 }
 
 function renderHotels(hotels) {
   const anyDated = hotels.some((h) => h.datedPrice);
   const list = hotels
-    .map((h) => {
+    .map((h, idx) => {
       const name = h.url
         ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.name)}</a>`
         : esc(h.name);
@@ -1502,11 +1545,13 @@ function renderHotels(hotels) {
         ? `<a class="hotel-link" href="${esc(h.url)}" target="_blank" rel="noopener">楽天トラベルで見る →</a>`
         : `<a class="hotel-link" href="https://www.google.com/search?q=${encodeURIComponent(h.name + ' 宿泊 予約')}" target="_blank" rel="noopener">空室・料金を探す →</a>`;
       const priceLabel = h.datedPrice ? '/ 泊・人〜（指定日）' : '/ 泊・人〜';
-      return `<div class="hotel">
+      const checked = idx === selectedHotelIdx ? ' checked' : '';
+      return `<div class="hotel${checked ? ' selected' : ''}" data-hotel="${idx}">
+      <label class="hotel-pick"><input type="radio" name="hotelsel" class="hotel-radio" data-idx="${idx}"${checked}><span>この宿で計算</span></label>
       <div class="hotel-top"><span class="hotel-name">${name}</span>${
         h.nightlyPrice
           ? `<span class="hotel-price${h.datedPrice ? ' dated' : ''}">${yen(h.nightlyPrice)} ${priceLabel}</span>`
-          : ''
+          : '<span class="hotel-price">料金不明</span>'
       }</div>
       ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
       ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
@@ -1515,7 +1560,7 @@ function renderHotels(hotels) {
     })
     .join('');
   return `<div class="info-card">
-    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・${anyDated ? '指定日の空室・' : ''}安い順）</div>
+    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・${anyDated ? '指定日の空室・' : ''}安い順／選んで滞在費に反映）</div>
     ${list}
     <p class="info-note">${
       anyDated
@@ -1523,6 +1568,20 @@ function renderHotels(hotels) {
         : '※価格は目安です。空室・料金・プランは予約ページでご確認ください。'
     }</p>
   </div>`;
+}
+
+// ホテルのラジオ選択で費用カードを更新する。
+function wireHotelSelection() {
+  document.querySelectorAll('.hotel-radio').forEach((r) => {
+    r.addEventListener('change', () => {
+      selectedHotelIdx = Number(r.getAttribute('data-idx')) || 0;
+      const card = $('cost-card');
+      if (card) card.outerHTML = renderCostCard();
+      document.querySelectorAll('.hotel').forEach((el) => {
+        el.classList.toggle('selected', Number(el.getAttribute('data-hotel')) === selectedHotelIdx);
+      });
+    });
+  });
 }
 
 function dayRouteLink(items) {

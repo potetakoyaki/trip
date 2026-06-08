@@ -183,10 +183,11 @@ export async function generateAiPlan(
     '- days[].theme: その日のねらい',
     '- days[].items[]: title(候補と一致), time(例"10:00"), category,',
     '   why(このスポットのオススメの楽しみ方を40〜70字で簡潔に。名物・回り方・ベスト時間帯のうち要点だけ。同じ語の繰り返しは避ける),',
-    '   access(行き方を一言), duration(滞在目安), alt(代替案), estCost(その場所の目安費用・円の数値。入場料や飲食代。無料は0),',
+    '   access(行き方を一言), duration(滞在目安), alt(代替案),',
+    '   estCost(その場所で1人が実際に使う費用の現実的な目安・円の数値。観光施設は入場料の実費、無料スポットは0。飲食店は ランチ1000〜2500・カフェ500〜1200・ディナー3000〜6000 を目安に内容相応で。安易に0や極端に低い額にしない),',
     '   hours(営業時間。一般知識でおおよそで良いので必ず入れる。例 "9:00-17:00"。24時間営業は "24時間"、店舗で不明確なら "11:00-22:00頃"),',
     '   lat,lng(その場所のおおよその緯度・経度の数値。移動時間の概算に使う)。',
-    '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、why に名物料理・おすすめメニュー・予算感を簡潔に書く（estCostに目安）。',
+    '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、why に名物料理・おすすめメニュー・予算感を簡潔に書く。estCost は上記の目安で必ず現実的な金額を入れる（0や数百円にしない）。',
     '  候補に飲食店が少なければ、そのエリアで評判の料理ジャンルや店を一般知識で提案してよい。',
     '- 観光スポットは候補から選び、同じ場所を重複させない。',
     '- 各日の項目は移動効率が良い順（地理的に近い場所が連続するよう）に並べ、time もその順で矛盾なく付ける。JSONのみ出力。',
@@ -263,7 +264,13 @@ export async function generateAiPlan(
         used.add(title);
         const rec = matchRecord(byTitle, title);
         const category = rec?.category ?? cleanStr(it?.category);
-        const cost = rec?.price ?? cleanNum(it?.estCost) ?? 0;
+        let estCost = rec?.price ?? cleanNum(it?.estCost);
+        // 食事は0や極端に低い額になりがちなので、時間帯から現実的な下限で補正する。
+        if (category === 'グルメ' && (estCost == null || estCost < 500)) {
+          const hour = parseInt(String(it?.time ?? '').slice(0, 2), 10);
+          estCost = Number.isFinite(hour) && hour >= 17 ? 3500 : 1500;
+        }
+        const cost = estCost ?? 0;
         if (category === 'グルメ') food += cost;
         else activities += cost;
         items.push({
@@ -278,7 +285,7 @@ export async function generateAiPlan(
           access: cleanStr(it?.access),
           duration: cleanStr(it?.duration),
           alt: cleanStr(it?.alt),
-          estCost: cleanNum(it?.estCost),
+          estCost: estCost ?? undefined,
           hours: rec?.hours ?? cleanStr(it?.hours),
           lat: rec?.lat ?? cleanCoord(it?.lat),
           lng: rec?.lng ?? cleanCoord(it?.lng),
