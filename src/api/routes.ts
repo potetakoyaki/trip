@@ -428,10 +428,45 @@ api.post('/collect/cancel', async (c) => {
 });
 
 // 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
-// 地名オートコンプリート（都道府県＋主要市区町村。漢字/ひらがな対応・静的データ）。
-api.get('/places', (c) => {
-  const q = c.req.query('q') || '';
-  return c.json({ places: searchPlaces(q, 8) });
+// 地名オートコンプリート。
+// 1) 静的リスト（都道府県＋主要市。漢字/ひらがな/カタカナ・即時）
+// 2) 国土地理院(GSI)の住所検索API（無料・キー不要）で全市町村＋施設＋テーマパーク等を補完。
+api.get('/places', async (c) => {
+  const q = (c.req.query('q') || '').trim();
+  const local = searchPlaces(q, 6);
+
+  let gsi: { label: string; value: string }[] = [];
+  if (q.length >= 2) {
+    try {
+      const url = `https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': c.env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)', Accept: 'application/json' },
+      });
+      if (res.ok) {
+        const arr = (await res.json()) as Array<{ properties?: { title?: string } }>;
+        if (Array.isArray(arr)) {
+          gsi = arr
+            .map((x) => String(x?.properties?.title ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 8)
+            .map((title) => ({ label: title, value: title }));
+        }
+      }
+    } catch {
+      /* GSI 失敗時は静的リストのみ */
+    }
+  }
+
+  // 静的を優先しつつ重複排除してマージ。
+  const seen = new Set(local.map((p) => p.value));
+  const merged = [...local];
+  for (const g of gsi) {
+    if (!seen.has(g.value)) {
+      seen.add(g.value);
+      merged.push(g);
+    }
+  }
+  return c.json({ places: merged.slice(0, 10) });
 });
 
 api.get('/areas/similar', async (c) => {
