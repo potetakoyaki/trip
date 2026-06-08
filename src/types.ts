@@ -96,8 +96,8 @@ export interface PlanRequest {
   keyword?: string;
   /** ホテルの希望条件（例: 温泉 / 露天風呂 / 夕食付き / リゾート）。 */
   hotelFeatures?: string[];
-  /** 省エネモード（軽量AIモデルでNeuron消費を抑える）。 */
-  eco?: boolean;
+  /** じっくりモード（高性能AIモデルで丁寧に作成。Neuron消費は増える）。未指定なら軽量モデル。 */
+  thorough?: boolean;
   /** 必ず含めたいスポット名（行きたいリストから作成時にAIへ優先で組み込ませる）。 */
   mustInclude?: string[];
   /** 自然言語の追加リクエスト（例「グルメ多めに」「もっとゆっくり」）。最優先で反映する。 */
