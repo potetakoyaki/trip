@@ -1,7 +1,8 @@
 import type { Env } from '../types';
 
-// 既定モデル。GEMINI_MODEL で上書き可能。gemini-2.0-flash は無料枠があり高速・高品質。
-const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
+// 既定モデル。GEMINI_MODEL で上書き可能。2.5-flash は現行の無料枠対象（2.0系は
+// アカウントによって無料枠が 0 のことがある）。高速・高品質。
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 /** GEMINI_API_KEY が設定されていれば true（＝外部Geminiを使う）。 */
 export function geminiEnabled(env: Env): boolean {
@@ -18,11 +19,17 @@ export async function geminiGenerate(
   env: Env,
   systemText: string,
   userText: string,
-  opts: { json?: boolean; maxOutputTokens?: number; temperature?: number } = {},
+  opts: {
+    json?: boolean;
+    maxOutputTokens?: number;
+    temperature?: number;
+    model?: string;
+    maxAttempts?: number;
+  } = {},
 ): Promise<string> {
   const key = (env.GEMINI_API_KEY ?? '').trim();
   if (!key) throw new Error('GEMINI_API_KEY が未設定です');
-  const model = (env.GEMINI_MODEL ?? '').trim() || DEFAULT_GEMINI_MODEL;
+  const model = (opts.model ?? '').trim() || (env.GEMINI_MODEL ?? '').trim() || DEFAULT_GEMINI_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model,
   )}:generateContent?key=${encodeURIComponent(key)}`;
@@ -32,6 +39,9 @@ export async function geminiGenerate(
     maxOutputTokens: opts.maxOutputTokens ?? 2048,
   };
   if (opts.json !== false) generationConfig.responseMimeType = 'application/json';
+  // 2.5系は既定で「思考(thinking)」に出力トークンを消費し、JSONが途中で切れたり
+  // 空応答(MAX_TOKENS)になることがある。構造化出力では思考を無効化し全トークンを本文へ。
+  if (model.includes('2.5')) generationConfig.thinkingConfig = { thinkingBudget: 0 };
 
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
@@ -42,7 +52,7 @@ export async function geminiGenerate(
   // 429（レート/クォータ超過）・503（一時的）はバックオフして再試行する。
   // 無料枠はRPM（毎分リクエスト数）が低く、抽出の並列呼び出しで一時的に超えやすいため。
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const maxAttempts = 3;
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 3);
   let lastErr = '';
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const res = await fetch(url, {
@@ -61,7 +71,7 @@ export async function geminiGenerate(
       return text;
     }
     const t = await res.text().catch(() => '');
-    lastErr = `Gemini APIエラー (${res.status}): ${t.slice(0, 300)}`;
+    lastErr = `Gemini APIエラー (${res.status}): ${t.slice(0, 500)}`;
     if ((res.status === 429 || res.status === 503) && attempt < maxAttempts) {
       await sleep(900 * attempt); // 0.9s, 1.8s
       continue;

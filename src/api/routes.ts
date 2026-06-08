@@ -47,6 +47,12 @@ import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
 
+// APIレスポンスはキャッシュさせない（診断・進捗ポーリング等が古い結果を返さないように）。
+api.use('*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+});
+
 // AIバインディングの疎通確認。つながっているか・どのモデルが応答するかを返す。
 // 「枠の上限」表示が出るのに使用ニューロンが0のとき、ここで本当の原因を確認できる。
 // （構造化出力の対応有無に左右されないよう、ここでは素のプロンプトで試す。）
@@ -71,17 +77,30 @@ api.get('/diag/ai', async (c) => {
     }
   }
 
-  // Gemini（APIキーが設定されていれば疎通確認）。Cloudflareの枠とは独立。
+  // Gemini（APIキーがあれば疎通確認）。Cloudflareの枠とは独立。
+  // 無料枠の配分はモデルごとに異なるため、候補モデルを順に試して「どれが通るか」を示す。
   if (geminiEnabled(env)) {
-    const t0 = Date.now();
-    try {
-      const out = await geminiGenerate(env, 'You are a test endpoint.', 'Reply with exactly: OK', {
-        json: false,
-        maxOutputTokens: 8,
-      });
-      results.push({ provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-2.0-flash', ok: true, ms: Date.now() - t0, sample: out.trim().slice(0, 60) });
-    } catch (e) {
-      results.push({ provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-2.0-flash', ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+    const candidates = [
+      (env.GEMINI_MODEL || '').trim() || 'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+    ];
+    const seen = new Set<string>();
+    for (const model of candidates) {
+      if (!model || seen.has(model)) continue;
+      seen.add(model);
+      const t0 = Date.now();
+      try {
+        const out = await geminiGenerate(env, 'You are a test endpoint.', 'Reply with exactly: OK', {
+          json: false,
+          maxOutputTokens: 24,
+          model,
+          maxAttempts: 1, // 診断は素早く判定したいので再試行しない
+        });
+        results.push({ provider: 'gemini', model, ok: true, ms: Date.now() - t0, sample: out.trim().slice(0, 60) });
+      } catch (e) {
+        results.push({ provider: 'gemini', model, ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   }
 

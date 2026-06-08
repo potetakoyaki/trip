@@ -35,5 +35,5 @@ USER_AGENT = "TripPlannerBot/0.1 (personal use)"
 #
 # Google Gemini を使う場合（Cloudflareのニューロン枠に依存せず、無料枠で高品質）:
 #   wrangler secret put GEMINI_API_KEY     # https://aistudio.google.com/apikey で無料取得
-#   （任意）GEMINI_MODEL を [vars] か secret で指定。未指定は gemini-2.0-flash。
+#   （任意）GEMINI_MODEL を [vars] か secret で指定。未指定は gemini-2.5-flash。
 # 設定するとスポット抽出・プラン生成が Gemini になり、未設定時は Workers AI を使う。
