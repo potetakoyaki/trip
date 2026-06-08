@@ -1,7 +1,7 @@
 import type { Env, Plan, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
-import { geocodePlanItems, geocodeQuery, haversineKm } from '../scrape/geocode';
+import { geocodePlanItems, geocodeQuery, haversineKm, reversePrefecture } from '../scrape/geocode';
 import { fetchRakutenHotels } from '../scrape/hotels';
 import { searchEvents, savePlan, ensureCoveredTable, isCovered, markCovered } from '../db/repository';
 import { fetchForecast } from '../scrape/weather';
@@ -84,6 +84,10 @@ export async function createPlan(
   }
 
   await report('情報を整理して宿泊先を検索中…', 68);
+  // エリアの中心座標と都道府県を1回求め、ホテルの地域絞り込み・地図の誤ピン防止に使う。
+  const areaCenter = body.area ? await geocodeQuery(env, body.area) : null;
+  const areaPref = areaCenter ? await reversePrefecture(env, areaCenter.lat, areaCenter.lng) : undefined;
+
   let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
   try {
     realHotels = await fetchRakutenHotels(env, body.area, origin, {
@@ -92,6 +96,7 @@ export async function createPlan(
       limit: 24,
       checkinDate: body.startDate,
       checkoutDate: body.endDate,
+      prefecture: areaPref,
     });
   } catch {
     realHotels = [];
@@ -109,10 +114,13 @@ export async function createPlan(
     );
   }
 
-  // 地図用に各スポットの実座標を取得（AIの推測座標を上書き。ベストエフォート）。
+  // 地図用に各スポットの実座標を取得（AIの推測座標を上書き。エリア近傍のみ採用）。
   await report('地図の座標を取得中…', 90);
   try {
-    await geocodePlanItems(env, plan.days.flatMap((d) => d.items), body.area);
+    await geocodePlanItems(env, plan.days.flatMap((d) => d.items), body.area, {
+      center: areaCenter,
+      maxKm: 150,
+    });
   } catch {
     /* 座標取得の失敗はプラン全体を止めない */
   }
@@ -123,11 +131,11 @@ export async function createPlan(
     try {
       const origin = await geocodeQuery(env, body.origin);
       const items = plan.days.flatMap((d) => d.items);
-      // 目的地は「エリア名」の座標を優先（個々のスポットの誤ジオコーディングで
-      // 距離が暴走するのを防ぎ、ホテル検索と同じ基準にする）。無ければ先頭スポット。
+      // 目的地は「エリア中心」を使う（個々のスポットの誤ジオコーディングで距離が
+      // 暴走するのを防ぎ、ホテル検索と同じ基準にする）。無ければ先頭スポット。
       const destItem = items.find((it) => it.lat != null && it.lng != null);
       const dest =
-        (await geocodeQuery(env, body.area ?? '')) ||
+        areaCenter ||
         (destItem && destItem.lat != null && destItem.lng != null
           ? { lat: destItem.lat, lng: destItem.lng }
           : null);
