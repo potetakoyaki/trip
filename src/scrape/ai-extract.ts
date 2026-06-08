@@ -71,10 +71,15 @@ export async function extractSpots(
   const messages = buildMessages(text, hint);
 
   // 0) Gemini（APIキーがあれば優先）。Cloudflareのニューロン枠(4006)に依存しない。
+  //    抽出は件数が多いので、無料枠RPMの高い flash-lite を使い、失敗時は即フォールバック
+  //    （maxAttempts=1）。これでじっくり収集でレート制限に当たりにくくする。
   if (geminiEnabled(env)) {
+    const extractModel = (env.GEMINI_EXTRACT_MODEL || '').trim() || 'gemini-2.5-flash-lite';
     try {
       const out = await geminiGenerate(env, String(messages[0].content), String(messages[1].content), {
         maxOutputTokens: 2048,
+        model: extractModel,
+        maxAttempts: 1,
       });
       const spots = readSpots({ response: out });
       if (spots.length) return spots;

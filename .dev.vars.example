@@ -24,5 +24,7 @@ JINA_API_KEY=
 # Gemini で行い、Cloudflare Workers AI のニューロン枠(4006)に依存しなくなる。
 # https://aistudio.google.com/apikey で無料取得。未設定なら Workers AI を使う。
 GEMINI_API_KEY=
-# 使用モデル（任意・未指定は gemini-2.5-flash）
+# プラン生成モデル（任意・未指定は gemini-2.5-flash）
 GEMINI_MODEL=
+# スポット抽出モデル（任意・未指定は gemini-2.5-flash-lite。無料枠RPMが高くレート制限を避けやすい）
+GEMINI_EXTRACT_MODEL=

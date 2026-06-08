@@ -637,6 +637,7 @@ async function deepCollect(force = false) {
     $('area').focus();
     return;
   }
+  $('recollect-btn').classList.add('hidden'); // 操作のたびに一旦隠す（収集済み時だけ後で出す）
   // 本当に収集するか確認する（時間と無料枠を使うため）。
   const ok = force
     ? await uiConfirm(
@@ -664,6 +665,8 @@ async function deepCollect(force = false) {
       hideProgressBar();
       setBusy(false);
       setStatus(r.message || 'このエリアは既に収集済みです。', r.reason === 'running' ? '' : 'ok');
+      // 「収集済み」のときだけ、その場で再収集できるボタンを出す。
+      if (r.reason === 'collected') $('recollect-btn').classList.remove('hidden');
       return;
     }
     // 条件（キーワード）が増えた分の差分だけ収集した場合。

@@ -45,7 +45,7 @@ export async function discoverAndScrape(
 
   // 同サービス（Jina/検索）への連続呼び出しを少し速める。対象サイト各ホストは
   // 1回ずつなのでレート制限の実害はほぼ無い。
-  const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 1200 });
+  const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 600 });
   const queries = opts.queries?.length ? opts.queries : buildQueries(area, opts.interests, opts.keyword);
   const maxPages = opts.maxPages ?? MAX_PAGES;
 
@@ -104,11 +104,11 @@ export async function discoverAndScrape(
     };
   }
 
-  // 3) AI でスポット抽出 → 保存。
-  // 同時実行は3本までに抑える（無料AI枠のレート制限＝特にGeminiの429を避けるため）。
+  // 3) AI でスポット抽出 → 保存。抽出は flash-lite（高RPM）を使うので同時実行を5本まで上げ、
+  // 速度を改善する（失敗分は Workers AI に即フォールバック）。
   if (opts.onExtractStart) await opts.onExtractStart();
   const scrapedAt = new Date().toISOString();
-  const perDoc = await mapLimit(docs, 3, async (doc) => {
+  const perDoc = await mapLimit(docs, 5, async (doc) => {
     try {
       const spots = await extractSpots(env, doc.text.slice(0, 6000), { area, interests: opts.interests });
       const events: NormalizedEvent[] = [];

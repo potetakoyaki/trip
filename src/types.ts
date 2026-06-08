@@ -17,8 +17,11 @@ export interface Env {
   /** Google Gemini API キー（任意）。設定すると抽出・プラン生成を Gemini で行い、
    *  Cloudflare Workers AI のニューロン枠（4006）に依存しなくなる。未設定なら Workers AI を使う。 */
   GEMINI_API_KEY?: string;
-  /** 使用する Gemini モデル名（任意・既定 gemini-2.0-flash）。 */
+  /** プラン生成に使う Gemini モデル名（任意・既定 gemini-2.5-flash）。 */
   GEMINI_MODEL?: string;
+  /** スポット抽出に使う Gemini モデル名（任意・既定 gemini-2.5-flash-lite）。
+   *  抽出は件数が多く、無料枠のRPMが高い flash-lite を使うことでレート制限を避ける。 */
+  GEMINI_EXTRACT_MODEL?: string;
 }
 
 /** スクレイパが返す正規化済みイベント（DB保存前）。 */

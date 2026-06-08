@@ -82,8 +82,8 @@ api.get('/diag/ai', async (c) => {
   if (geminiEnabled(env)) {
     const candidates = [
       (env.GEMINI_MODEL || '').trim() || 'gemini-2.5-flash',
+      (env.GEMINI_EXTRACT_MODEL || '').trim() || 'gemini-2.5-flash-lite',
       'gemini-2.0-flash',
-      'gemini-2.0-flash-lite',
     ];
     const seen = new Set<string>();
     for (const model of candidates) {
