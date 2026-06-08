@@ -58,7 +58,10 @@
         <form id="plan-form">
           <div class="field">
             <label for="area">エリア・行き先</label>
-            <input type="text" id="area" placeholder="例: 箱根 / 京都 / 神奈川県" autocomplete="off" required />
+            <div class="autocomplete">
+              <input type="text" id="area" placeholder="例: 萩 / 京都 / 神奈川県（ひらがなでもOK）" autocomplete="off" required />
+              <ul id="area-suggest" class="suggest hidden"></ul>
+            </div>
           </div>
 
           <div class="grid-2">

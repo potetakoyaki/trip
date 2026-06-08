@@ -1807,8 +1807,53 @@ function esc(s) {
 }
 
 // --- bootstrap ---
+// エリア入力の地名オートコンプリート（県＋市を確定させ、荻/萩の取り違え等を防ぐ）。
+function setupAreaAutocomplete() {
+  const input = $('area');
+  const list = $('area-suggest');
+  if (!input || !list) return;
+  let timer = null;
+  const hide = () => {
+    list.classList.add('hidden');
+    list.innerHTML = '';
+  };
+  const render = (places) => {
+    if (!places || !places.length) return hide();
+    list.innerHTML = places
+      .map((p) => `<li data-v="${esc(p.value)}">📍 ${esc(p.label)}</li>`)
+      .join('');
+    list.classList.remove('hidden');
+  };
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (timer) clearTimeout(timer);
+    if (q.length < 1) return hide();
+    timer = setTimeout(async () => {
+      try {
+        const r = await api('/places?q=' + encodeURIComponent(q));
+        render(r.places);
+      } catch {
+        hide();
+      }
+    }, 160);
+  });
+  // mousedown は blur より先に発火するので選択が確実に入る。
+  list.addEventListener('mousedown', (e) => {
+    const li = e.target.closest('li[data-v]');
+    if (!li) return;
+    e.preventDefault();
+    input.value = li.getAttribute('data-v');
+    hide();
+  });
+  input.addEventListener('blur', () => setTimeout(hide, 150));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hide();
+  });
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   initDates();
+  setupAreaAutocomplete();
   $('plan-form').addEventListener('submit', submitPlan);
   $('collect-btn').addEventListener('click', () => deepCollect(false));
   $('recollect-btn').addEventListener('click', () => deepCollect(true));

@@ -1864,6 +1864,37 @@ footer {
   cursor: default;
 }
 
+/* ---------- 地名オートコンプリート ---------- */
+.autocomplete {
+  position: relative;
+}
+.suggest {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 6px;
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.suggest li {
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+.suggest li:hover {
+  background: #fdf1ea;
+  color: var(--brand-ink);
+}
+
 /* ---------- 確認モーダル（自前のポップアップ） ---------- */
 .modal-overlay {
   position: fixed;

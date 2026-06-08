@@ -44,6 +44,7 @@ import { extractSpotsDiag } from '../scrape/ai-extract';
 import { AI_MODELS } from '../planner/ai';
 import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
+import { searchPlaces } from '../data/places';
 
 export const api = new Hono<{ Bindings: Env }>();
 
@@ -427,6 +428,12 @@ api.post('/collect/cancel', async (c) => {
 });
 
 // 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
+// 地名オートコンプリート（都道府県＋主要市区町村。漢字/ひらがな対応・静的データ）。
+api.get('/places', (c) => {
+  const q = c.req.query('q') || '';
+  return c.json({ places: searchPlaces(q, 8) });
+});
+
 api.get('/areas/similar', async (c) => {
   const area = (c.req.query('area') || '').trim();
   if (!area) return c.json({ match: null });
