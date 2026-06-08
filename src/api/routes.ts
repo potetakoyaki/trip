@@ -120,6 +120,66 @@ api.get('/diag/ai', async (c) => {
   });
 });
 
+// 楽天ホテルの実地診断。?area=萩市&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD
+// 「指定日の料金が取れない」原因（認証/キーワード/空室検索の生レスポンス）を切り分ける。
+api.get('/diag/hotel', async (c) => {
+  const env = c.env;
+  const area = c.req.query('area') || '';
+  const checkin = c.req.query('checkin') || '';
+  const checkout = c.req.query('checkout') || '';
+  const out: Record<string, unknown> = {
+    creds: { appId: !!env.RAKUTEN_APP_ID, accessKey: !!env.RAKUTEN_ACCESS_KEY },
+  };
+  // 1) キーワード検索（日付なし）で hotelNo を取得
+  const kw = await rakutenHotelSearch(env, area, reqOrigin(c.req.url), { limit: 10 });
+  out.keyword = {
+    ok: kw.ok,
+    status: kw.status,
+    error: kw.error,
+    count: kw.hotels.length,
+    sample: kw.hotels.slice(0, 3).map((h) => ({ name: h.name, no: h.hotelNo, area: h.area, minCharge: h.nightlyPrice })),
+  };
+  // 2) 生の空室検索（指定日・adultNum=2）
+  if (kw.hotels.length && checkin && checkout && env.RAKUTEN_APP_ID && env.RAKUTEN_ACCESS_KEY) {
+    const nos = kw.hotels.map((h) => h.hotelNo).filter((n): n is number => typeof n === 'number').slice(0, 5);
+    const params = new URLSearchParams({
+      applicationId: env.RAKUTEN_APP_ID,
+      accessKey: env.RAKUTEN_ACCESS_KEY,
+      format: 'json',
+      checkinDate: checkin,
+      checkoutDate: checkout,
+      adultNum: '2',
+      hotelNo: nos.join(','),
+    });
+    const url = `https://openapi.rakuten.co.jp/engine/api/Travel/VacantHotelSearch/20170426?${params.toString()}`;
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)', Accept: 'application/json' },
+      });
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        /* JSONでない */
+      }
+      out.vacant = {
+        status: res.status,
+        testedNos: nos,
+        error: data?.error ? `${data.error}: ${data.error_description ?? ''}`.trim() : undefined,
+        hotelCount: Array.isArray(data?.hotels) ? data.hotels.length : 0,
+        sampleCharge: data?.hotels?.[0]?.hotel?.[0]?.hotelBasicInfo?.hotelMinCharge ?? null,
+        raw: text.slice(0, 400),
+      };
+    } catch (e) {
+      out.vacant = { error: e instanceof Error ? e.message : String(e) };
+    }
+  } else {
+    out.vacant = { skipped: 'hotelが0 または 日付/認証が無い' };
+  }
+  return c.json(out);
+});
+
 /** リクエストURLからオリジン（https://host）を取り出す。楽天新APIのOrigin/Referer用。 */
 function reqOrigin(reqUrl: string): string | undefined {
   try {
