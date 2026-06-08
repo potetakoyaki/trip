@@ -565,7 +565,14 @@ api.get('/plan-status', async (c) => {
   await ensurePlanJobs(c.env.DB);
   const job = await getPlanJob(c.env.DB, id);
   if (!job) return c.json({ found: false });
-  return c.json({ found: true, status: job.status, planId: job.plan_id, error: job.error });
+  return c.json({
+    found: true,
+    status: job.status,
+    planId: job.plan_id,
+    error: job.error,
+    stage: job.stage,
+    progress: job.progress,
+  });
 });
 
 api.get('/plan/:id', async (c) => {

@@ -318,6 +318,8 @@ const ENSURE_PLAN_JOBS_SQL = `CREATE TABLE IF NOT EXISTS plan_jobs (
   status TEXT NOT NULL DEFAULT 'pending',
   plan_id TEXT,
   error TEXT,
+  stage TEXT,
+  progress INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 )`;
@@ -329,10 +331,23 @@ export interface PlanJob {
   status: string;
   plan_id: string | null;
   error: string | null;
+  stage: string | null;
+  progress: number | null;
 }
 
 export async function ensurePlanJobs(db: D1Database): Promise<void> {
   await db.prepare(ENSURE_PLAN_JOBS_SQL).run();
+  // 既存テーブルへの後付けカラム（無ければ追加。既にあればエラーは無視）。
+  for (const sql of [
+    'ALTER TABLE plan_jobs ADD COLUMN stage TEXT',
+    'ALTER TABLE plan_jobs ADD COLUMN progress INTEGER NOT NULL DEFAULT 0',
+  ]) {
+    try {
+      await db.prepare(sql).run();
+    } catch {
+      /* カラムが既に存在する場合は無視 */
+    }
+  }
 }
 
 export async function createPlanJob(
@@ -369,6 +384,21 @@ export async function updatePlanJob(
   await db
     .prepare('UPDATE plan_jobs SET status=?, plan_id=?, error=?, updated_at=? WHERE id=?')
     .bind(p.status, p.planId ?? null, p.error ?? null, p.now, id)
+    .run();
+}
+
+/** ジョブの進捗（ステージ表示と%）だけを更新する。status は変えない。 */
+export async function updatePlanProgress(
+  db: D1Database,
+  id: string,
+  stage: string,
+  progress: number,
+  now: string,
+): Promise<void> {
+  const pct = Math.max(0, Math.min(99, Math.round(progress))); // 完了(100)は status=done 側で表現する
+  await db
+    .prepare('UPDATE plan_jobs SET stage=?, progress=?, updated_at=? WHERE id=?')
+    .bind(stage, pct, now, id)
     .run();
 }
 

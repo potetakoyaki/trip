@@ -64,7 +64,14 @@ function safeParse(s: string): string[] | undefined {
 
 // ---- プラン作成ジョブ ----
 import { createPlan } from '../planner/create-plan';
-import { ensurePlanJobs, getPlanJob, hidePlan, takePendingPlanJob, updatePlanJob } from '../db/repository';
+import {
+  ensurePlanJobs,
+  getPlanJob,
+  hidePlan,
+  takePendingPlanJob,
+  updatePlanJob,
+  updatePlanProgress,
+} from '../db/repository';
 
 /** 1件のプラン作成ジョブを実行する。 */
 export async function runPlanJob(env: Env, id: string): Promise<void> {
@@ -73,7 +80,10 @@ export async function runPlanJob(env: Env, id: string): Promise<void> {
   if (!job || job.status !== 'pending') return;
   try {
     const req = JSON.parse(job.request);
-    const r = await createPlan(env, req, job.origin ?? undefined);
+    // createPlan の各段階の進捗をDBへ書き、クライアントが /plan-status で読み取る。
+    const onProgress = (stage: string, progress: number) =>
+      updatePlanProgress(env.DB, id, stage, progress, new Date().toISOString());
+    const r = await createPlan(env, req, job.origin ?? undefined, onProgress);
     // 作成中にキャンセルされていたら、できたプランは履歴に出さず終了する。
     const fresh = await getPlanJob(env.DB, id);
     if (fresh && fresh.status === 'cancelled') {

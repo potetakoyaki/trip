@@ -28,7 +28,15 @@ const BROWSER_UA =
  */
 export async function discoverAndScrape(
   env: Env,
-  opts: { area: string; interests?: string[]; keyword?: string; queries?: string[]; maxPages?: number },
+  opts: {
+    area: string;
+    interests?: string[];
+    keyword?: string;
+    queries?: string[];
+    maxPages?: number;
+    /** 本文取得が終わり、AI抽出（重い工程）を始める直前に呼ばれる。進捗表示用。 */
+    onExtractStart?: () => void | Promise<void>;
+  },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
   const empty: DiscoverResult = { total: 0, docs: [], stats: { candidates: 0, fetched: 0, engine: null } };
@@ -97,6 +105,7 @@ export async function discoverAndScrape(
   }
 
   // 3) AI でスポット抽出（ページごとに並列実行して時間短縮）→ 保存
+  if (opts.onExtractStart) await opts.onExtractStart();
   const scrapedAt = new Date().toISOString();
   const perDoc = await Promise.all(
     docs.map(async (doc) => {
