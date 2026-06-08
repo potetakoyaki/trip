@@ -548,7 +548,7 @@ function showProgress(doneRounds, totalRounds, collected, done) {
   $('cp-fill').style.width = (done ? 100 : pct) + '%';
   $('cp-label').innerHTML = done
     ? '✅ 収集完了'
-    : `<span class="cp-spin"></span>じっくり収集中… ${doneRounds}/${totalRounds} ラウンド`;
+    : `<span class="cp-spin"></span>じっくり収集中… ${doneRounds}/${totalRounds} ラウンド（${pct}%）`;
   $('cp-count').textContent = `合計 ${collected} 件`;
 }
 
@@ -825,21 +825,41 @@ const PLAN_STAGES = [
   '仕上げています…',
 ];
 let planStageTimer = null;
+let planPct = 0;
+let planStageIdx = 0;
 
+// プラン作成はサーバー側がジョブ方式で、細かい進捗を返さない。そのため時間ベースで
+// 滑らかに増える推定％を表示する（序盤は速く・後半はゆっくり、96%で頭打ち）。
+// 完了は呼び出し側が hideProgressBar() で消す。
 function startPlanProgress() {
-  let i = 0;
-  showIndet(PLAN_STAGES[0]);
+  planStageIdx = 0;
+  planPct = 3;
+  setPlanProgress(PLAN_STAGES[0], planPct);
+  let ticks = 0;
   if (planStageTimer) clearInterval(planStageTimer);
   planStageTimer = setInterval(() => {
-    i = (i + 1) % PLAN_STAGES.length;
-    setIndetLabel(PLAN_STAGES[i]);
-  }, 4500);
+    ticks++;
+    const step = planPct < 60 ? 2.5 : planPct < 85 ? 0.9 : 0.3;
+    planPct = Math.min(96, planPct + step);
+    if (ticks % 10 === 0) planStageIdx = (planStageIdx + 1) % PLAN_STAGES.length; // 約4.5秒ごとに表示を進める
+    setPlanProgress(PLAN_STAGES[planStageIdx], planPct);
+  }, 450);
 }
 function stopPlanProgress() {
   if (planStageTimer) {
     clearInterval(planStageTimer);
     planStageTimer = null;
   }
+}
+// プラン作成中の進捗バー（％表記つき）。
+function setPlanProgress(label, pct) {
+  const wrap = $('collect-progress');
+  wrap.classList.remove('hidden', 'done');
+  const fill = $('cp-fill');
+  fill.classList.remove('indet');
+  fill.style.width = Math.round(pct) + '%';
+  $('cp-label').innerHTML = `<span class="cp-spin"></span>${esc(label)}`;
+  $('cp-count').textContent = Math.round(pct) + '%';
 }
 function showIndet(label) {
   const wrap = $('collect-progress');
