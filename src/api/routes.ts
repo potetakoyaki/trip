@@ -75,11 +75,9 @@ api.get('/diag/ai', async (c) => {
   // 無料枠の配分はモデルごとに異なるため、候補モデルを順に試して「どれが通るか」を示す。
   if (geminiEnabled(env)) {
     const candidates = [
-      (env.GEMINI_MODEL || '').trim() || 'gemini-2.0-flash',
-      'gemini-2.5-flash',
+      (env.GEMINI_MODEL || '').trim() || 'gemini-2.5-flash',
+      'gemini-2.0-flash',
       'gemini-2.0-flash-lite',
-      'gemini-1.5-flash',
-      'gemini-1.5-flash-8b',
     ];
     const seen = new Set<string>();
     for (const model of candidates) {
@@ -89,7 +87,7 @@ api.get('/diag/ai', async (c) => {
       try {
         const out = await geminiGenerate(env, 'You are a test endpoint.', 'Reply with exactly: OK', {
           json: false,
-          maxOutputTokens: 8,
+          maxOutputTokens: 24,
           model,
           maxAttempts: 1, // 診断は素早く判定したいので再試行しない
         });

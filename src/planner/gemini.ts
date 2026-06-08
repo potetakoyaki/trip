@@ -1,7 +1,8 @@
 import type { Env } from '../types';
 
-// 既定モデル。GEMINI_MODEL で上書き可能。gemini-2.0-flash は無料枠があり高速・高品質。
-const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
+// 既定モデル。GEMINI_MODEL で上書き可能。2.5-flash は現行の無料枠対象（2.0系は
+// アカウントによって無料枠が 0 のことがある）。高速・高品質。
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 /** GEMINI_API_KEY が設定されていれば true（＝外部Geminiを使う）。 */
 export function geminiEnabled(env: Env): boolean {
@@ -38,6 +39,9 @@ export async function geminiGenerate(
     maxOutputTokens: opts.maxOutputTokens ?? 2048,
   };
   if (opts.json !== false) generationConfig.responseMimeType = 'application/json';
+  // 2.5系は既定で「思考(thinking)」に出力トークンを消費し、JSONが途中で切れたり
+  // 空応答(MAX_TOKENS)になることがある。構造化出力では思考を無効化し全トークンを本文へ。
+  if (model.includes('2.5')) generationConfig.thinkingConfig = { thinkingBudget: 0 };
 
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
