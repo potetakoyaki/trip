@@ -582,11 +582,32 @@ select:focus {
 
 /* hotels */
 .hotel {
-  padding: 10px 0;
+  padding: 10px;
+  border: 1px solid transparent;
   border-bottom: 1px solid var(--line);
+  border-radius: 10px;
 }
 .hotel:last-of-type {
   border-bottom: none;
+}
+.hotel.selected {
+  border-color: var(--brand);
+  background: #f5f3ff;
+}
+.hotel-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--brand-ink);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.hotel-pick input {
+  accent-color: var(--brand);
+  width: 16px;
+  height: 16px;
 }
 .hotel-top {
   display: flex;
