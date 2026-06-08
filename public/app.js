@@ -14,6 +14,7 @@ let currentCandidates = [];
 let planHotels = [];
 let planCostParts = null; // { nights, food, activities, transport, budget }
 let selectedHotelIdx = 0;
+const HOTELS_SHOWN = 4; // 最初に展開表示するホテル件数（以降は「もっと見る」）
 let pendingMustInclude = null; // 行きたいリストから作成する際の必須スポット
 let pendingRefine = null; // 自然言語の調整指示（作り直し/別案）
 let planMap = null; // Leaflet マップ
@@ -1605,7 +1606,8 @@ function renderHotels(hotels) {
         : `<a class="hotel-link" href="https://www.google.com/search?q=${encodeURIComponent(h.name + ' 宿泊 予約')}" target="_blank" rel="noopener">空室・料金を探す →</a>`;
       const priceLabel = h.datedPrice ? '/ 泊・人〜（指定日）' : '/ 泊・人〜';
       const checked = idx === selectedHotelIdx ? ' checked' : '';
-      return `<div class="hotel${checked ? ' selected' : ''}" data-hotel="${idx}">
+      const extra = idx >= HOTELS_SHOWN ? ' hotel-extra hidden' : '';
+      return `<div class="hotel${checked ? ' selected' : ''}${extra}" data-hotel="${idx}">
       <label class="hotel-pick"><input type="radio" name="hotelsel" class="hotel-radio" data-idx="${idx}"${checked}><span>この宿で計算</span></label>
       <div class="hotel-top"><span class="hotel-name">${name}</span>${
         h.nightlyPrice
@@ -1618,9 +1620,14 @@ function renderHotels(hotels) {
     </div>`;
     })
     .join('');
+  const moreBtn =
+    hotels.length > HOTELS_SHOWN
+      ? `<button type="button" class="hotel-more" id="hotel-more-btn">▼ 他の${hotels.length - HOTELS_SHOWN}件を表示</button>`
+      : '';
   return `<div class="info-card">
     <div class="info-h">🏨 宿泊の候補（${hotels.length}件・${anyDated ? '指定日の空室・' : ''}安い順／選んで滞在費に反映）</div>
     ${list}
+    ${moreBtn}
     <p class="info-note">${
       anyDated
         ? '※価格は指定した宿泊日の空室の最低料金（1泊1人〜）です。最新の空室・プランは予約ページでご確認ください。'
@@ -1629,7 +1636,7 @@ function renderHotels(hotels) {
   </div>`;
 }
 
-// ホテルのラジオ選択で費用カードを更新する。
+// ホテルのラジオ選択で費用カードを更新／「もっと見る」で残りを展開。
 function wireHotelSelection() {
   document.querySelectorAll('.hotel-radio').forEach((r) => {
     r.addEventListener('change', () => {
@@ -1641,6 +1648,13 @@ function wireHotelSelection() {
       });
     });
   });
+  const moreBtn = $('hotel-more-btn');
+  if (moreBtn) {
+    moreBtn.addEventListener('click', () => {
+      document.querySelectorAll('.hotel-extra').forEach((el) => el.classList.remove('hidden'));
+      moreBtn.remove();
+    });
+  }
 }
 
 function dayRouteLink(items) {

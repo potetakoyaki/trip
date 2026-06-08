@@ -123,11 +123,14 @@ export async function createPlan(
     try {
       const origin = await geocodeQuery(env, body.origin);
       const items = plan.days.flatMap((d) => d.items);
+      // 目的地は「エリア名」の座標を優先（個々のスポットの誤ジオコーディングで
+      // 距離が暴走するのを防ぎ、ホテル検索と同じ基準にする）。無ければ先頭スポット。
       const destItem = items.find((it) => it.lat != null && it.lng != null);
       const dest =
-        destItem && destItem.lat != null && destItem.lng != null
+        (await geocodeQuery(env, body.area ?? '')) ||
+        (destItem && destItem.lat != null && destItem.lng != null
           ? { lat: destItem.lat, lng: destItem.lng }
-          : await geocodeQuery(env, body.area ?? '');
+          : null);
       if (origin && dest) {
         const straight = haversineKm(origin, dest);
         const mode = plan.travel?.mode || body.transport || '';

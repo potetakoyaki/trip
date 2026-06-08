@@ -94,6 +94,7 @@ const ENSURE_JOBS_SQL = `CREATE TABLE IF NOT EXISTS collect_jobs (
   total_rounds INTEGER NOT NULL DEFAULT 6,
   status TEXT NOT NULL DEFAULT 'pending',
   collected INTEGER NOT NULL DEFAULT 0,
+  pass INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 )`;
@@ -106,29 +107,38 @@ export interface CollectJob {
   total_rounds: number;
   status: string;
   collected: number;
+  pass: number;
 }
 
 /** マイグレーション無しでも動くよう、ジョブ表を都度作成（冪等）。 */
 export async function ensureJobsTable(db: D1Database): Promise<void> {
   await db.prepare(ENSURE_JOBS_SQL).run();
+  // 既存テーブルへ pass カラムを後付け（再収集の深さ＝何回目か）。
+  try {
+    await db.prepare('ALTER TABLE collect_jobs ADD COLUMN pass INTEGER NOT NULL DEFAULT 0').run();
+  } catch {
+    /* 既にあれば無視 */
+  }
 }
 
 export async function startJob(
   db: D1Database,
-  p: { area: string; keyword?: string; interests?: string[]; totalRounds: number; now: string },
+  p: { area: string; keyword?: string; interests?: string[]; totalRounds: number; pass?: number; now: string },
 ): Promise<void> {
+  const pass = p.pass ?? 0;
   await db
     .prepare(
-      `INSERT INTO collect_jobs (area, keyword, interests, round, total_rounds, status, collected, created_at, updated_at)
-       VALUES (?,?,?,1,?, 'pending', 0, ?, ?)
+      `INSERT INTO collect_jobs (area, keyword, interests, round, total_rounds, status, collected, pass, created_at, updated_at)
+       VALUES (?,?,?,1,?, 'pending', 0, ?, ?, ?)
        ON CONFLICT(area) DO UPDATE SET keyword=excluded.keyword, interests=excluded.interests, round=1,
-         total_rounds=excluded.total_rounds, status='pending', updated_at=excluded.updated_at`,
+         total_rounds=excluded.total_rounds, status='pending', pass=excluded.pass, updated_at=excluded.updated_at`,
     )
     .bind(
       p.area,
       p.keyword ?? null,
       p.interests ? JSON.stringify(p.interests) : null,
       p.totalRounds,
+      pass,
       p.now,
       p.now,
     )

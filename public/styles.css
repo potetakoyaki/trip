@@ -609,6 +609,22 @@ select:focus {
   width: 16px;
   height: 16px;
 }
+.hotel-more {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: #fafbff;
+  color: var(--brand-ink);
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hotel-more:hover {
+  background: #f5f3ff;
+}
 .hotel-top {
   display: flex;
   justify-content: space-between;
@@ -1822,19 +1838,29 @@ footer {
   }
 }
 
-/* ---------- じっくり収集ボタン列 ---------- */
-.collect-btns {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-  flex-wrap: wrap;
+/* ---------- 再収集ボタン（「収集済み」メッセージの下に出る） ---------- */
+.recollect-btn {
+  display: block;
+  margin: 10px auto 0;
+  padding: 9px 18px;
+  border: 1px solid var(--brand);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--brand-ink);
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.05s;
 }
-.collect-btns #collect-btn {
-  flex: 1 1 auto;
+.recollect-btn:hover {
+  background: #f5f3ff;
 }
-.collect-btns #recollect-btn {
-  flex: 0 0 auto;
-  white-space: nowrap;
+.recollect-btn:active {
+  transform: scale(0.98);
+}
+.recollect-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ---------- 確認モーダル（自前のポップアップ） ---------- */

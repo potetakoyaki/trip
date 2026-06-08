@@ -405,13 +405,15 @@ api.post('/collect/start', async (c) => {
     });
   }
 
-  // 未収集 → フル収集（バックグラウンド）。
+  // 未収集 → フル収集（バックグラウンド）。再収集(force)のたびに pass を増やし、
+  // 検索結果の「より深い」位置を取りに行く（同じ上位結果の重複を避け、新規を集める）。
+  const pass = force ? (existing?.pass ?? 0) + 1 : 0;
   const { totalRounds } = roundQueries(area, 1, keyword);
-  await startJob(c.env.DB, { area, keyword, interests, totalRounds, now });
+  await startJob(c.env.DB, { area, keyword, interests, totalRounds, pass, now });
   await markCovered(c.env.DB, area, '', now);
   if (keyword) await markCovered(c.env.DB, area, kw, now);
   c.executionCtx.waitUntil(processOneRound(c.env, area).catch(() => {}));
-  return c.json({ ok: true, area, totalRounds });
+  return c.json({ ok: true, area, totalRounds, pass });
 });
 
 // じっくり収集をキャンセルする（以降のラウンドを止める）。

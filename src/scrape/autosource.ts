@@ -36,6 +36,8 @@ export async function discoverAndScrape(
     maxPages?: number;
     /** 本文取得が終わり、AI抽出（重い工程）を始める直前に呼ばれる。進捗表示用。 */
     onExtractStart?: () => void | Promise<void>;
+    /** 検索結果の取得開始位置。再収集時に深い結果を取って新規を増やす。 */
+    resultOffset?: number;
   },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
@@ -48,6 +50,7 @@ export async function discoverAndScrape(
   const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 600 });
   const queries = opts.queries?.length ? opts.queries : buildQueries(area, opts.interests, opts.keyword);
   const maxPages = opts.maxPages ?? MAX_PAGES;
+  const offset = Math.max(0, opts.resultOffset ?? 0); // 再収集の深さ
 
   const docs: { source: string; url: string; text: string }[] = [];
   let engine: string | null = null;
@@ -61,7 +64,7 @@ export async function discoverAndScrape(
     if (results.length) {
       engine = 'jina';
       candidates += results.length;
-      pushDocs(docs, results.slice(0, 2), maxPages);
+      pushDocs(docs, results.slice(offset, offset + 2), maxPages);
     }
   }
 
@@ -77,7 +80,7 @@ export async function discoverAndScrape(
       }
     }
     const urls: string[] = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = offset; i < offset + 6; i++) {
       for (const list of perQuery) {
         if (list[i] && !urls.includes(list[i])) urls.push(list[i]);
       }
@@ -124,6 +127,8 @@ export async function discoverAndScrape(
           prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
           city: s.city || area,
           hours: s.hours?.trim() || undefined,
+          startAt: isoDate(s.startDate),
+          endAt: isoDate(s.endDate),
           raw: { from: doc.source, area },
         });
       }
@@ -144,6 +149,18 @@ export async function discoverAndScrape(
     stats: { candidates, fetched: docs.length, engine },
     note: total === 0 ? 'ページは取得できたが、AIがスポットを抽出できませんでした。' : undefined,
   };
+}
+
+/** "YYYY-MM-DD" 形式のみを ISO 日時に変換。妥当な年でなければ undefined（創作日付の混入防止）。 */
+function isoDate(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const m = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return undefined;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (y < 2000 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return undefined;
+  return `${m[1]}-${m[2]}-${m[3]}T00:00:00`;
 }
 
 /** 同時実行数を limit に抑えて配列を非同期マップする（順序は保持）。 */

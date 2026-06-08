@@ -134,6 +134,8 @@ export async function generateAiPlan(
     category: e.category ?? undefined,
     area: e.city ?? e.prefecture ?? undefined,
     price: e.price ?? undefined,
+    // 開催日が分かっているイベントは日付を渡し、その日の項目に置けるようにする。
+    date: e.start_at ? String(e.start_at).slice(0, 10) : undefined,
     desc: e.description ? String(e.description).slice(0, 120) : undefined,
   }));
   // 「行きたい」スポット（必ず含める）を候補に足す。
@@ -190,6 +192,7 @@ export async function generateAiPlan(
     '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、why に名物料理・おすすめメニュー・予算感を簡潔に書く。estCost は上記の目安で必ず現実的な金額を入れる（0や数百円にしない）。',
     '  候補に飲食店が少なければ、そのエリアで評判の料理ジャンルや店を一般知識で提案してよい。',
     '- 観光スポットは候補から選び、同じ場所を重複させない。',
+    '- 候補に date（開催日）付きのイベント（祭り・花火等）があれば、その date と一致する日の項目に必ず組み込む。',
     '- 各日の項目は移動効率が良い順（地理的に近い場所が連続するよう）に並べ、time もその順で矛盾なく付ける。JSONのみ出力。',
   ].join('\n');
 
