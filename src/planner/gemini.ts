@@ -39,21 +39,34 @@ export async function geminiGenerate(
     generationConfig,
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  // 429（レート/クォータ超過）・503（一時的）はバックオフして再試行する。
+  // 無料枠はRPM（毎分リクエスト数）が低く、抽出の並列呼び出しで一時的に超えやすいため。
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const maxAttempts = 3;
+  let lastErr = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      const parts = data?.candidates?.[0]?.content?.parts;
+      const text = Array.isArray(parts) ? parts.map((p: any) => p?.text ?? '').join('') : '';
+      if (!text.trim()) {
+        const reason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'empty';
+        throw new Error(`Gemini応答が空でした (${reason})`);
+      }
+      return text;
+    }
     const t = await res.text().catch(() => '');
-    throw new Error(`Gemini APIエラー (${res.status}): ${t.slice(0, 300)}`);
+    lastErr = `Gemini APIエラー (${res.status}): ${t.slice(0, 300)}`;
+    if ((res.status === 429 || res.status === 503) && attempt < maxAttempts) {
+      await sleep(900 * attempt); // 0.9s, 1.8s
+      continue;
+    }
+    throw new Error(lastErr);
   }
-  const data = (await res.json()) as any;
-  const parts = data?.candidates?.[0]?.content?.parts;
-  const text = Array.isArray(parts) ? parts.map((p: any) => p?.text ?? '').join('') : '';
-  if (!text.trim()) {
-    const reason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || 'empty';
-    throw new Error(`Gemini応答が空でした (${reason})`);
-  }
-  return text;
+  throw new Error(lastErr || 'Gemini 生成に失敗しました');
 }
