@@ -303,6 +303,10 @@ function computeSchedule(items, mode) {
   let cur = parseClock(items[0] && items[0].time);
   if (cur == null) cur = 600; // 10:00 既定
   for (let i = 0; i < items.length; i++) {
+    // 各項目自身の time を尊重する。計算上の到着より後ろならその時刻に合わせる
+    // （朝食など本来早い予定が、前項目の積み上げで11:00等にズレるのを防ぐ）。
+    const own = parseClock(items[i].time);
+    if (own != null && own >= cur) cur = own;
     times[i] = fmtClock(cur);
     const stay = parseDurationMin(items[i].duration);
     const leg = i < items.length - 1 ? travelLeg(items[i], items[i + 1], mode) : null;

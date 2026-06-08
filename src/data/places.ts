@@ -145,16 +145,21 @@ const CITIES: Place[] = [
 
 export const PLACES: Place[] = [...PREFS, ...CITIES];
 
-/** クエリ（漢字/ひらがな）で前方一致・部分一致の候補を返す（最大 limit 件）。 */
+/** カタカナ→ひらがな（kana照合用。カタカナ入力でもヒットさせる）。 */
+function kataToHira(s: string): string {
+  return s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+}
+
+/** クエリ（漢字/ひらがな/カタカナ）で前方一致・部分一致の候補を返す（最大 limit 件）。 */
 export function searchPlaces(q: string, limit = 8): { label: string; value: string }[] {
   const s = q.trim();
   if (!s) return [];
+  const sk = kataToHira(s); // kana(ひらがな)照合用に正規化
   const scored: { p: Place; score: number }[] = [];
   for (const p of PLACES) {
-    const hay = p.name + ' ' + p.kana;
     let score = -1;
-    if (p.name.startsWith(s) || p.kana.startsWith(s)) score = 0; // 前方一致を優先
-    else if (hay.includes(s)) score = 1;
+    if (p.name.startsWith(s) || p.kana.startsWith(sk)) score = 0; // 前方一致を優先
+    else if (p.name.includes(s) || p.kana.includes(sk)) score = 1;
     if (score >= 0) scored.push({ p, score });
   }
   scored.sort((a, b) => a.score - b.score || a.p.name.length - b.p.name.length);

@@ -120,6 +120,66 @@ api.get('/diag/ai', async (c) => {
   });
 });
 
+// 楽天ホテルの実地診断。?area=萩市&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD
+// 「指定日の料金が取れない」原因（認証/キーワード/空室検索の生レスポンス）を切り分ける。
+api.get('/diag/hotel', async (c) => {
+  const env = c.env;
+  const area = c.req.query('area') || '';
+  const checkin = c.req.query('checkin') || '';
+  const checkout = c.req.query('checkout') || '';
+  const out: Record<string, unknown> = {
+    creds: { appId: !!env.RAKUTEN_APP_ID, accessKey: !!env.RAKUTEN_ACCESS_KEY },
+  };
+  // 1) キーワード検索（日付なし）で hotelNo を取得
+  const kw = await rakutenHotelSearch(env, area, reqOrigin(c.req.url), { limit: 10 });
+  out.keyword = {
+    ok: kw.ok,
+    status: kw.status,
+    error: kw.error,
+    count: kw.hotels.length,
+    sample: kw.hotels.slice(0, 3).map((h) => ({ name: h.name, no: h.hotelNo, area: h.area, minCharge: h.nightlyPrice })),
+  };
+  // 2) 生の空室検索（指定日・adultNum=2）
+  if (kw.hotels.length && checkin && checkout && env.RAKUTEN_APP_ID && env.RAKUTEN_ACCESS_KEY) {
+    const nos = kw.hotels.map((h) => h.hotelNo).filter((n): n is number => typeof n === 'number').slice(0, 5);
+    const params = new URLSearchParams({
+      applicationId: env.RAKUTEN_APP_ID,
+      accessKey: env.RAKUTEN_ACCESS_KEY,
+      format: 'json',
+      checkinDate: checkin,
+      checkoutDate: checkout,
+      adultNum: '2',
+      hotelNo: nos.join(','),
+    });
+    const url = `https://openapi.rakuten.co.jp/engine/api/Travel/VacantHotelSearch/20170426?${params.toString()}`;
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)', Accept: 'application/json' },
+      });
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        /* JSONでない */
+      }
+      out.vacant = {
+        status: res.status,
+        testedNos: nos,
+        error: data?.error ? `${data.error}: ${data.error_description ?? ''}`.trim() : undefined,
+        hotelCount: Array.isArray(data?.hotels) ? data.hotels.length : 0,
+        sampleCharge: data?.hotels?.[0]?.hotel?.[0]?.hotelBasicInfo?.hotelMinCharge ?? null,
+        raw: text.slice(0, 400),
+      };
+    } catch (e) {
+      out.vacant = { error: e instanceof Error ? e.message : String(e) };
+    }
+  } else {
+    out.vacant = { skipped: 'hotelが0 または 日付/認証が無い' };
+  }
+  return c.json(out);
+});
+
 /** リクエストURLからオリジン（https://host）を取り出す。楽天新APIのOrigin/Referer用。 */
 function reqOrigin(reqUrl: string): string | undefined {
   try {
@@ -428,10 +488,45 @@ api.post('/collect/cancel', async (c) => {
 });
 
 // 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
-// 地名オートコンプリート（都道府県＋主要市区町村。漢字/ひらがな対応・静的データ）。
-api.get('/places', (c) => {
-  const q = c.req.query('q') || '';
-  return c.json({ places: searchPlaces(q, 8) });
+// 地名オートコンプリート。
+// 1) 静的リスト（都道府県＋主要市。漢字/ひらがな/カタカナ・即時）
+// 2) 国土地理院(GSI)の住所検索API（無料・キー不要）で全市町村＋施設＋テーマパーク等を補完。
+api.get('/places', async (c) => {
+  const q = (c.req.query('q') || '').trim();
+  const local = searchPlaces(q, 6);
+
+  let gsi: { label: string; value: string }[] = [];
+  if (q.length >= 2) {
+    try {
+      const url = `https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': c.env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)', Accept: 'application/json' },
+      });
+      if (res.ok) {
+        const arr = (await res.json()) as Array<{ properties?: { title?: string } }>;
+        if (Array.isArray(arr)) {
+          gsi = arr
+            .map((x) => String(x?.properties?.title ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 8)
+            .map((title) => ({ label: title, value: title }));
+        }
+      }
+    } catch {
+      /* GSI 失敗時は静的リストのみ */
+    }
+  }
+
+  // 静的を優先しつつ重複排除してマージ。
+  const seen = new Set(local.map((p) => p.value));
+  const merged = [...local];
+  for (const g of gsi) {
+    if (!seen.has(g.value)) {
+      seen.add(g.value);
+      merged.push(g);
+    }
+  }
+  return c.json({ places: merged.slice(0, 10) });
 });
 
 api.get('/areas/similar', async (c) => {

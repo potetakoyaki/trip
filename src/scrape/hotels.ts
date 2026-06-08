@@ -123,7 +123,8 @@ export async function rakutenHotelSearch(
     const nos = Array.from(
       new Set(all.map((h) => h.hotelNo).filter((n): n is number => typeof n === 'number')),
     );
-    const prices = await fetchVacantPrices(env, nos, opts.checkinDate, opts.checkoutDate, opts.adults ?? 1, origin);
+    // adultNum=1 はシングル在庫の無い宿で空室0になりやすく実価格が取れない。既定2。
+    const prices = await fetchVacantPrices(env, nos, opts.checkinDate, opts.checkoutDate, opts.adults ?? 2, origin);
     for (const h of all) {
       if (h.hotelNo != null && prices.has(h.hotelNo)) {
         h.nightlyPrice = prices.get(h.hotelNo);
