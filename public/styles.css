@@ -407,6 +407,19 @@ select:focus {
   line-height: 1.6;
 }
 
+/* プラン上部のお知らせ（AI無料枠切れで簡易プランに切替えた等）。 */
+.plan-notice {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  font-weight: 600;
+}
+
 .status {
   min-height: 1.3em;
   margin: 14px 0 0;
