@@ -1821,3 +1821,101 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- じっくり収集ボタン列 ---------- */
+.collect-btns {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.collect-btns #collect-btn {
+  flex: 1 1 auto;
+}
+.collect-btns #recollect-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ---------- 確認モーダル（自前のポップアップ） ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(17, 24, 39, 0.55);
+  backdrop-filter: blur(3px);
+  animation: modal-fade 0.16s ease;
+}
+.modal-overlay.hidden {
+  display: none;
+}
+.modal {
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border-radius: 18px;
+  padding: 22px 22px 18px;
+  box-shadow: 0 24px 60px rgba(17, 24, 39, 0.28);
+  animation: modal-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1.1);
+}
+.modal-title {
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: var(--ink, #111827);
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+.modal-msg {
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--ink-soft, #4b5563);
+  white-space: pre-line;
+  margin: 0 0 18px;
+}
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.modal-actions .btn-ghost,
+.modal-actions .btn-primary {
+  min-width: 96px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+}
+.modal-ok.danger {
+  background: #ef4444;
+  border-color: #ef4444;
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.3);
+}
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes modal-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+/* ---------- 地図のポップアップを当アプリのトーンに ---------- */
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(17, 24, 39, 0.22);
+  padding: 2px 4px;
+}
+.leaflet-popup-content {
+  margin: 10px 14px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink, #111827);
+}
+.leaflet-popup-tip {
+  box-shadow: 0 10px 28px rgba(17, 24, 39, 0.18);
+}

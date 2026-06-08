@@ -354,6 +354,7 @@ api.post('/collect/start', async (c) => {
   if (!area) return c.json({ error: 'エリアが必要です' }, 400);
   const keyword = str(raw?.keyword, 80);
   const interests = strArr(raw?.interests);
+  const force = raw?.force === true; // 再収集ボタン: 収集済みでもフル収集し直す
   await ensureJobsTable(c.env.DB);
   await ensureCoveredTable(c.env.DB);
   const now = new Date().toISOString();
@@ -371,7 +372,7 @@ api.post('/collect/start', async (c) => {
   }
 
   const collected = (existing && existing.status === 'done') || existingCount >= 15;
-  if (collected) {
+  if (collected && !force) {
     // 条件（キーワード）が増えていたら、その差分だけを追加収集する。
     if (keyword && !(await isCovered(c.env.DB, area, kw))) {
       let added = 0;

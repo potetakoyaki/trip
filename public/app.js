@@ -508,8 +508,58 @@ function hideCancel() {
 }
 
 // 進行中のバックグラウンド処理をキャンセルする。
+// 標準の confirm() の代わりに使う、デザインを整えた確認モーダル。Promise<boolean> を返す。
+function uiConfirm(message, opts = {}) {
+  return new Promise((resolve) => {
+    const overlay = $('modal-overlay');
+    const titleEl = $('modal-title');
+    const msgEl = $('modal-msg');
+    const okBtn = $('modal-ok');
+    const cancelBtn = $('modal-cancel');
+    titleEl.textContent = opts.title || '';
+    titleEl.style.display = opts.title ? '' : 'none';
+    msgEl.textContent = message || '';
+    okBtn.textContent = opts.okText || 'OK';
+    cancelBtn.textContent = opts.cancelText || 'キャンセル';
+    okBtn.classList.toggle('danger', !!opts.danger);
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    setTimeout(() => okBtn.focus(), 0);
+    const done = (val) => {
+      overlay.classList.add('hidden');
+      overlay.setAttribute('aria-hidden', 'true');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    const onOk = () => done(true);
+    const onCancel = () => done(false);
+    const onBackdrop = (e) => {
+      if (e.target === overlay) done(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') done(false);
+      else if (e.key === 'Enter') done(true);
+    };
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 async function cancelOp() {
-  if (!confirm('本当にキャンセルしますか？\n進行中の作成・収集を中止します。')) return;
+  if (
+    !(await uiConfirm('進行中の作成・収集を中止します。', {
+      title: '本当にキャンセルしますか？',
+      okText: 'キャンセルする',
+      cancelText: '続ける',
+      danger: true,
+    }))
+  )
+    return;
   const op = activeOp;
   bgGen++; // 進行中のポーリングを無効化
   if (pollTimer) {
@@ -563,8 +613,9 @@ async function resolveArea(area) {
   try {
     const r = await api('/areas/similar?area=' + encodeURIComponent(area));
     if (r.match && r.match !== area) {
-      const same = confirm(
-        `「${r.match}」と同じ場所ですか？\n\n同じなら、過去に収集したデータを使います（収集の手間とAI消費を節約できます）。`,
+      const same = await uiConfirm(
+        `同じなら、過去に収集したデータを使います（収集の手間とAI消費を節約できます）。`,
+        { title: `「${r.match}」と同じ場所ですか？`, okText: '同じ（使う）', cancelText: '違う' },
       );
       if (same) {
         $('area').value = r.match;
@@ -577,7 +628,7 @@ async function resolveArea(area) {
   return area;
 }
 
-async function deepCollect() {
+async function deepCollect(force = false) {
   // 必須チェック: エリアは必須（ブラウザ標準の警告も表示）。
   const area0 = $('area').value.trim();
   if (!area0) {
@@ -587,23 +638,26 @@ async function deepCollect() {
     return;
   }
   // 本当に収集するか確認する（時間と無料枠を使うため）。
-  if (
-    !confirm(
-      `「${area0}」をじっくり収集しますか？\n\nバックグラウンドで数分かけて情報を集めます（無料のAI枠を使います）。\n途中でキャンセルもできます。`,
-    )
-  ) {
-    return;
-  }
+  const ok = force
+    ? await uiConfirm(
+        `収集済みでも、もう一度バックグラウンドで情報を集め直します（無料のAI枠を使います）。`,
+        { title: `「${area0}」を再収集しますか？`, okText: '再収集する', cancelText: 'やめる' },
+      )
+    : await uiConfirm(
+        `バックグラウンドで数分かけて情報を集めます（無料のAI枠を使います）。途中でキャンセルもできます。`,
+        { title: `「${area0}」をじっくり収集しますか？`, okText: '収集する', cancelText: 'やめる' },
+      );
+  if (!ok) return;
   setBusy(true);
   let area = await resolveArea(area0);
   const keyword = $('keyword').value.trim() || undefined;
   const interests = [...selectedInterests];
-  showIndet('収集できるか確認中…');
+  showIndet(force ? '再収集を開始中…' : '収集できるか確認中…');
   try {
     const r = await api('/collect/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ area, keyword, interests }),
+      body: JSON.stringify({ area, keyword, interests, force }),
     });
     // 既に収集中／収集済みなら、再収集せずメッセージを出す（AI消費の無駄を防ぐ）。
     if (r.ok === false) {
@@ -717,6 +771,8 @@ function setBusy(busy) {
   main.disabled = busy;
   main.classList.toggle('loading', busy);
   $('collect-btn').disabled = busy;
+  const rc = $('recollect-btn');
+  if (rc) rc.disabled = busy;
 }
 
 // 進行中の操作を localStorage に記録し、リロード時に再開できるようにする。
@@ -1651,7 +1707,15 @@ async function loadHistory() {
 }
 
 async function deleteSavedPlan(id) {
-  if (!confirm('この保存プランを一覧から消しますか？（データは残るので共有リンクからは見られます）')) return;
+  if (
+    !(await uiConfirm('一覧から消します（データは残るので共有リンクからは見られます）。', {
+      title: 'この保存プランを消しますか？',
+      okText: '消す',
+      cancelText: 'やめる',
+      danger: true,
+    }))
+  )
+    return;
   try {
     await api('/plan/' + encodeURIComponent(id), { method: 'DELETE' });
     loadHistory();
@@ -1729,7 +1793,8 @@ function esc(s) {
 window.addEventListener('DOMContentLoaded', async () => {
   initDates();
   $('plan-form').addEventListener('submit', submitPlan);
-  $('collect-btn').addEventListener('click', deepCollect);
+  $('collect-btn').addEventListener('click', () => deepCollect(false));
+  $('recollect-btn').addEventListener('click', () => deepCollect(true));
   $('share-btn').addEventListener('click', sharePlan);
   $('save-btn').addEventListener('click', saveCurrentPlan);
   $('print-btn').addEventListener('click', () => window.print());

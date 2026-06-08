@@ -168,7 +168,10 @@
             <span class="btn-label">プランを作成する</span>
           </button>
 
-          <button type="button" class="btn-secondary" id="collect-btn">🔬 じっくり収集（バックグラウンド・数分／画面を閉じてもOK）</button>
+          <div class="collect-btns">
+            <button type="button" class="btn-secondary" id="collect-btn">🔬 じっくり収集（バックグラウンド・数分／画面を閉じてもOK）</button>
+            <button type="button" class="btn-ghost" id="recollect-btn" title="収集済みのエリアでも、もう一度情報を集め直します">🔄 再収集</button>
+          </div>
 
           <p class="hint">
             💡 登録は不要です。エリアを入れて作成すると、アプリが自動で情報を集めてプラン化します（初回は数十秒かかることがあります）。
@@ -215,6 +218,18 @@
     <footer>
       <p>Powered by Cloudflare Workers · Hono · D1 · Workers AI</p>
     </footer>
+
+    <!-- 確認ダイアログ（標準のconfirmの代わりに使う自前モーダル） -->
+    <div id="modal-overlay" class="modal-overlay hidden" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-msg">
+        <div id="modal-title" class="modal-title"></div>
+        <p id="modal-msg" class="modal-msg"></p>
+        <div class="modal-actions">
+          <button type="button" id="modal-cancel" class="btn-ghost">キャンセル</button>
+          <button type="button" id="modal-ok" class="btn-primary modal-ok">OK</button>
+        </div>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>
