@@ -21,6 +21,8 @@ export interface HotelSearchOpts {
   checkoutDate?: string;
   /** 大人の人数（既定1）。 */
   adults?: number;
+  /** 対象の都道府県（例 "山口県"）。キーワードに加え、結果もこの県で絞る。 */
+  prefecture?: string;
 }
 
 // 2026年の楽天API刷新後の新エンドポイント（旧 app.rakuten.co.jp は2026/5に停止）。
@@ -44,7 +46,11 @@ export async function rakutenHotelSearch(
     return { ok: false, status: 0, hotels: [], error: 'RAKUTEN_ACCESS_KEY 未設定（新APIのpk_キー）' };
   if (!area) return { ok: false, status: 0, hotels: [], error: 'エリア未指定' };
 
-  const keyword = [area, ...(opts.keywords ?? [])].map((s) => s.trim()).filter(Boolean).join(' ');
+  // 都道府県を先頭に付けて地理を絞る（"萩" だけだと全国の同名地にマッチするため）。
+  const keyword = [opts.prefecture, area, ...(opts.keywords ?? [])]
+    .map((s) => (s ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
   const limit = opts.limit ?? 24;
 
   const headers: Record<string, string> = {
@@ -104,6 +110,12 @@ export async function rakutenHotelSearch(
     }
     const pageCount = Number(data.pagingInfo?.pageCount ?? 1);
     if (page >= pageCount) break;
+  }
+
+  // 対象の都道府県で絞る（別地方の同名地ヒットを除外）。0件になるなら絞らない。
+  if (opts.prefecture) {
+    const inPref = all.filter((h) => (h.area ?? '').includes(opts.prefecture!));
+    if (inPref.length) all = inPref;
   }
 
   // 指定日があれば、空室検索でその日の実価格を取得して上書きする。

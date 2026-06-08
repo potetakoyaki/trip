@@ -44,6 +44,7 @@ import { extractSpotsDiag } from '../scrape/ai-extract';
 import { AI_MODELS } from '../planner/ai';
 import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
+import { searchPlaces } from '../data/places';
 
 export const api = new Hono<{ Bindings: Env }>();
 
@@ -82,8 +83,8 @@ api.get('/diag/ai', async (c) => {
   if (geminiEnabled(env)) {
     const candidates = [
       (env.GEMINI_MODEL || '').trim() || 'gemini-2.5-flash',
+      (env.GEMINI_EXTRACT_MODEL || '').trim() || 'gemini-2.5-flash-lite',
       'gemini-2.0-flash',
-      'gemini-2.0-flash-lite',
     ];
     const seen = new Set<string>();
     for (const model of candidates) {
@@ -354,6 +355,7 @@ api.post('/collect/start', async (c) => {
   if (!area) return c.json({ error: 'エリアが必要です' }, 400);
   const keyword = str(raw?.keyword, 80);
   const interests = strArr(raw?.interests);
+  const force = raw?.force === true; // 再収集ボタン: 収集済みでもフル収集し直す
   await ensureJobsTable(c.env.DB);
   await ensureCoveredTable(c.env.DB);
   const now = new Date().toISOString();
@@ -371,7 +373,7 @@ api.post('/collect/start', async (c) => {
   }
 
   const collected = (existing && existing.status === 'done') || existingCount >= 15;
-  if (collected) {
+  if (collected && !force) {
     // 条件（キーワード）が増えていたら、その差分だけを追加収集する。
     if (keyword && !(await isCovered(c.env.DB, area, kw))) {
       let added = 0;
@@ -404,13 +406,15 @@ api.post('/collect/start', async (c) => {
     });
   }
 
-  // 未収集 → フル収集（バックグラウンド）。
+  // 未収集 → フル収集（バックグラウンド）。再収集(force)のたびに pass を増やし、
+  // 検索結果の「より深い」位置を取りに行く（同じ上位結果の重複を避け、新規を集める）。
+  const pass = force ? (existing?.pass ?? 0) + 1 : 0;
   const { totalRounds } = roundQueries(area, 1, keyword);
-  await startJob(c.env.DB, { area, keyword, interests, totalRounds, now });
+  await startJob(c.env.DB, { area, keyword, interests, totalRounds, pass, now });
   await markCovered(c.env.DB, area, '', now);
   if (keyword) await markCovered(c.env.DB, area, kw, now);
   c.executionCtx.waitUntil(processOneRound(c.env, area).catch(() => {}));
-  return c.json({ ok: true, area, totalRounds });
+  return c.json({ ok: true, area, totalRounds, pass });
 });
 
 // じっくり収集をキャンセルする（以降のラウンドを止める）。
@@ -424,6 +428,12 @@ api.post('/collect/cancel', async (c) => {
 });
 
 // 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
+// 地名オートコンプリート（都道府県＋主要市区町村。漢字/ひらがな対応・静的データ）。
+api.get('/places', (c) => {
+  const q = c.req.query('q') || '';
+  return c.json({ places: searchPlaces(q, 8) });
+});
+
 api.get('/areas/similar', async (c) => {
   const area = (c.req.query('area') || '').trim();
   if (!area) return c.json({ match: null });

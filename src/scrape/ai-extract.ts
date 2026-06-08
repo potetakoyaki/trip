@@ -13,6 +13,9 @@ export interface Spot {
   city?: string;
   description?: string;
   hours?: string;
+  /** 期間限定イベントの開催日（本文に明記がある場合のみ。YYYY-MM-DD）。 */
+  startDate?: string;
+  endDate?: string;
 }
 
 const JSON_SCHEMA = {
@@ -29,6 +32,8 @@ const JSON_SCHEMA = {
           city: { type: 'string' },
           description: { type: 'string' },
           hours: { type: 'string' },
+          startDate: { type: 'string' },
+          endDate: { type: 'string' },
         },
         required: ['title'],
       },
@@ -48,6 +53,7 @@ function buildMessages(text: string, hint: { area?: string; interests?: string[]
     ...hintLines,
     '観光名所だけでなく、カフェ・レストラン・名物グルメの店、体験・アクティビティ・レジャー施設・イベントも積極的に拾ってください。',
     '各要素のフィールド: title(名称・必須), category(グルメ/自然/歴史/アート/音楽/体験/宿泊/祭り/観光 のいずれか), prefecture, city, description(その場所の魅力や名物を40〜80字で具体的に), hours(営業時間。文章に記載があれば "9:00-17:00" の形で。記載が無ければ省略し創作しない)。',
+    'startDate/endDate: 祭り・花火・期間限定イベント等で、本文に開催日や期間が「年まで含めて」明記されている場合のみ "YYYY-MM-DD" 形式で入れる（単日なら startDate のみ）。年が不明・通年営業・恒常的なスポットは必ず省略し、日付を創作しない。',
     '',
     '文章:',
     text,
@@ -71,10 +77,15 @@ export async function extractSpots(
   const messages = buildMessages(text, hint);
 
   // 0) Gemini（APIキーがあれば優先）。Cloudflareのニューロン枠(4006)に依存しない。
+  //    抽出は件数が多いので、無料枠RPMの高い flash-lite を使い、失敗時は即フォールバック
+  //    （maxAttempts=1）。これでじっくり収集でレート制限に当たりにくくする。
   if (geminiEnabled(env)) {
+    const extractModel = (env.GEMINI_EXTRACT_MODEL || '').trim() || 'gemini-2.5-flash-lite';
     try {
       const out = await geminiGenerate(env, String(messages[0].content), String(messages[1].content), {
         maxOutputTokens: 2048,
+        model: extractModel,
+        maxAttempts: 1,
       });
       const spots = readSpots({ response: out });
       if (spots.length) return spots;
