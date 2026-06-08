@@ -817,6 +817,7 @@ function submitPlan(ev) {
 async function startPlan() {
   if (!validateForm()) return;
   setBusy(true);
+  $('recollect-btn').classList.add('hidden'); // 再収集ボタンが残らないよう隠す
   // 新規作成中は前回プランの保存/共有/印刷/調整ボタンを隠す（完成後に出し直す）。
   $('save-btn').classList.add('hidden');
   $('share-btn').classList.add('hidden');
