@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 
 // 抽出は無料枠を節約するため軽量モデルを使う。JSONモード(schema強制)により
 // 8bでも構造化出力は安定する。失敗時も同モデルの素のJSON出力で再試行。
@@ -66,8 +67,23 @@ export async function extractSpots(
   text: string,
   hint: { area?: string; interests?: string[] } = {},
 ): Promise<Spot[]> {
-  if (!env.AI || !text.trim()) return [];
+  if (!text.trim()) return [];
   const messages = buildMessages(text, hint);
+
+  // 0) Gemini（APIキーがあれば優先）。Cloudflareのニューロン枠(4006)に依存しない。
+  if (geminiEnabled(env)) {
+    try {
+      const out = await geminiGenerate(env, String(messages[0].content), String(messages[1].content), {
+        maxOutputTokens: 2048,
+      });
+      const spots = readSpots({ response: out });
+      if (spots.length) return spots;
+    } catch {
+      /* Workers AI へフォールバック */
+    }
+  }
+
+  if (!env.AI) return [];
 
   // 1) JSONモード（schema強制）。max_tokens を確保し出力の途中切れを防ぐ。
   try {

@@ -1,5 +1,6 @@
 import type { Env, EventRecord, Plan, PlanDay, PlanItem, PlanRequest } from '../types';
 import { enumerateDates, generateRulePlan } from './rule-based';
+import { geminiEnabled, geminiGenerate } from './gemini';
 
 // じっくりモード用の高性能モデル。
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
@@ -119,7 +120,8 @@ export async function generateAiPlan(
   req: PlanRequest,
   opts: { hotels?: import('../types').HotelOption[] } = {},
 ): Promise<Plan> {
-  if (!env.AI || events.length === 0) return generateRulePlan(events, req);
+  // Gemini か Workers AI のどちらも使えない、または候補が無いときはルールベース。
+  if ((!env.AI && !geminiEnabled(env)) || events.length === 0) return generateRulePlan(events, req);
 
   const dates = enumerateDates(req.startDate, req.endDate);
   const nights = Math.max(0, dates.length - 1);
@@ -191,46 +193,58 @@ export async function generateAiPlan(
     '- 各日の項目は移動効率が良い順（地理的に近い場所が連続するよう）に並べ、time もその順で矛盾なく付ける。JSONのみ出力。',
   ].join('\n');
 
-  // じっくりモードでは高性能モデルを使う。通常は軽量モデルでNeuron消費を抑える。
-  const primary = req.thorough ? MODEL : ECO_MODEL;
-  const fallback = primary === MODEL ? ECO_MODEL : MODEL;
-
-  const ai = env.AI; // 上の guard で defined。nested closure 内でも参照できるよう束ねる。
-  const runModel = async (m: string): Promise<{ response?: unknown }> =>
-    (await ai.run(m, {
-      messages: [
-        { role: 'system', content: sys },
-        { role: 'user', content: user },
-      ],
-      max_tokens: 3000,
-      response_format: { type: 'json_schema', json_schema: SCHEMA },
-    })) as { response?: unknown };
-
-  let res: { response?: unknown };
-  try {
-    res = await runModel(primary);
-  } catch (e) {
-    const kind = classifyAiError(e);
-    // 本当の枠切れ・上限は別モデルでも回復しないので、弱いルールベースに退避せず即エラー。
-    if (kind === 'quota') throw new AiQuotaError();
-    // 混雑・モデル固有のエラーは、もう一方のモデルで一度だけ再試行する
-    // （例: 軽量モデルが応答できない/構造化出力に未対応でも高性能モデルなら通る）。
+  // Workers AI でプラン生成（軽量/高性能モデルの2段フォールバック付き）。
+  const runWorkersAI = async (): Promise<{ response?: unknown }> => {
+    const ai = env.AI;
+    if (!ai) throw new Error('Workers AI(env.AI) が無効です');
+    // じっくりモードでは高性能モデルを使う。通常は軽量モデルでNeuron消費を抑える。
+    const primary = req.thorough ? MODEL : ECO_MODEL;
+    const fallback = primary === MODEL ? ECO_MODEL : MODEL;
+    const runModel = async (m: string): Promise<{ response?: unknown }> =>
+      (await ai.run(m, {
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: user },
+        ],
+        max_tokens: 3000,
+        response_format: { type: 'json_schema', json_schema: SCHEMA },
+      })) as { response?: unknown };
     try {
-      res = await runModel(fallback);
-    } catch (e2) {
-      const kind2 = classifyAiError(e2);
-      if (kind2 === 'quota') throw new AiQuotaError();
-      if (kind2 === 'busy') {
+      return await runModel(primary);
+    } catch (e) {
+      const kind = classifyAiError(e);
+      // 本当の枠切れ・上限は別モデルでも回復しないので即エラー（上位でルールベース化）。
+      if (kind === 'quota') throw new AiQuotaError();
+      try {
+        return await runModel(fallback);
+      } catch (e2) {
+        const kind2 = classifyAiError(e2);
+        if (kind2 === 'quota') throw new AiQuotaError();
+        if (kind2 === 'busy') {
+          throw new Error(
+            'AIが混雑しているようです（一時的な容量超過の可能性で、無料枠の消費とは別です）。少し待ってから再度お試しください。詳細: ' +
+              aiErrText(e2),
+          );
+        }
         throw new Error(
-          'AIが混雑しているようです（一時的な容量超過の可能性で、無料枠の消費とは別です）。少し待ってから再度お試しください。詳細: ' +
-            aiErrText(e2),
+          'AIでのプラン生成に失敗しました（時間をおいて再度お試しください）。詳細: ' + aiErrText(e2),
         );
       }
-      // 原因を隠さず、本当のエラー内容を添えて上位（ジョブ）へ返す。
-      throw new Error(
-        'AIでのプラン生成に失敗しました（時間をおいて再度お試しください）。詳細: ' + aiErrText(e2),
-      );
     }
+  };
+
+  // 生成の実行：Gemini（APIキーがあれば優先・Cloudflareの枠に依存しない）→ Workers AI。
+  let res: { response?: unknown };
+  if (geminiEnabled(env)) {
+    try {
+      const text = await geminiGenerate(env, sys, user, { maxOutputTokens: 4096 });
+      res = { response: text };
+    } catch {
+      // Gemini が失敗したら Workers AI にフォールバック（枠切れなら AiQuotaError）。
+      res = await runWorkersAI();
+    }
+  } else {
+    res = await runWorkersAI();
   }
 
   try {

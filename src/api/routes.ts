@@ -42,6 +42,7 @@ import {
 } from '../db/repository';
 import { extractSpotsDiag } from '../scrape/ai-extract';
 import { AI_MODELS } from '../planner/ai';
+import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 
 export const api = new Hono<{ Bindings: Env }>();
@@ -51,28 +52,52 @@ export const api = new Hono<{ Bindings: Env }>();
 // （構造化出力の対応有無に左右されないよう、ここでは素のプロンプトで試す。）
 api.get('/diag/ai', async (c) => {
   const env = c.env;
-  if (!env.AI) {
+  const results: Array<Record<string, unknown>> = [];
+
+  // Workers AI（バインディングがあれば各モデルを軽く叩く）。
+  if (env.AI) {
+    for (const model of AI_MODELS) {
+      const t0 = Date.now();
+      try {
+        const r = (await env.AI.run(model, {
+          messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+          max_tokens: 8,
+        })) as { response?: unknown };
+        const sample = typeof r?.response === 'string' ? r.response.trim().slice(0, 60) : (r?.response ?? null);
+        results.push({ provider: 'workers-ai', model, ok: true, ms: Date.now() - t0, sample });
+      } catch (e) {
+        results.push({ provider: 'workers-ai', model, ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }
+
+  // Gemini（APIキーが設定されていれば疎通確認）。Cloudflareの枠とは独立。
+  if (geminiEnabled(env)) {
+    const t0 = Date.now();
+    try {
+      const out = await geminiGenerate(env, 'You are a test endpoint.', 'Reply with exactly: OK', {
+        json: false,
+        maxOutputTokens: 8,
+      });
+      results.push({ provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-2.0-flash', ok: true, ms: Date.now() - t0, sample: out.trim().slice(0, 60) });
+    } catch (e) {
+      results.push({ provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-2.0-flash', ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  if (!env.AI && !geminiEnabled(env)) {
     return c.json({
       ok: false,
       bound: false,
-      note: 'AIバインディング(env.AI)が無効です。wrangler.toml の [ai] と再デプロイを確認してください。',
+      note: 'Workers AI も Gemini も未設定です。wrangler.toml の [ai] か、GEMINI_API_KEY を設定してください。',
     });
   }
-  const results: Array<Record<string, unknown>> = [];
-  for (const model of AI_MODELS) {
-    const t0 = Date.now();
-    try {
-      const r = (await env.AI.run(model, {
-        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
-        max_tokens: 8,
-      })) as { response?: unknown };
-      const sample = typeof r?.response === 'string' ? r.response.trim().slice(0, 60) : (r?.response ?? null);
-      results.push({ model, ok: true, ms: Date.now() - t0, sample });
-    } catch (e) {
-      results.push({ model, ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
-    }
-  }
-  return c.json({ ok: results.some((r) => r.ok), bound: true, results });
+  return c.json({
+    ok: results.some((r) => r.ok),
+    bound: true,
+    geminiConfigured: geminiEnabled(env),
+    results,
+  });
 });
 
 /** リクエストURLからオリジン（https://host）を取り出す。楽天新APIのOrigin/Referer用。 */
