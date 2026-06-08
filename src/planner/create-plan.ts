@@ -90,6 +90,8 @@ export async function createPlan(
       keywords: body.hotelFeatures,
       maxPrice: body.budget,
       limit: 24,
+      checkinDate: body.startDate,
+      checkoutDate: body.endDate,
     });
   } catch {
     realHotels = [];

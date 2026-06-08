@@ -604,6 +604,10 @@ select:focus {
   font-size: 0.88rem;
   white-space: nowrap;
 }
+/* 指定日の空室実価格は色を変えて「目安」と区別する。 */
+.hotel-price.dated {
+  color: var(--ok, #16a34a);
+}
 .hotel-area {
   font-size: 0.82rem;
   color: var(--muted);
