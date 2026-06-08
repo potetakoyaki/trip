@@ -1852,6 +1852,10 @@ footer {
   cursor: pointer;
   transition: background 0.15s, transform 0.05s;
 }
+/* display:block が .hidden(display:none) に勝ってしまうため、明示的に隠す。 */
+.recollect-btn.hidden {
+  display: none;
+}
 .recollect-btn:hover {
   background: #f5f3ff;
 }
