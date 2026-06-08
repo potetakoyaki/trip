@@ -1090,7 +1090,7 @@ function renderPlanDays() {
 }
 
 // 日ごとの色
-const DAY_COLORS = ['#4f46e5', '#0ea5e9', '#f97316', '#15803d', '#db2777', '#7c3aed', '#0891b2'];
+const DAY_COLORS = ['#f2683c', '#e11d48', '#d97706', '#7c3aed', '#0891b2', '#16a34a', '#db2777'];
 
 // プランのスポットを地図にピン表示し、日ごとに線で結ぶ（Leaflet+OpenStreetMap・無料）。
 function renderMap() {

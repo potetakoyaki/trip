@@ -1,21 +1,22 @@
 :root {
-  --ink: #0f172a;
-  --ink-soft: #475569;
-  --muted: #94a3b8;
-  --line: #e7ebf2;
-  --bg: #f6f8fc;
+  /* あたたかい旅行アプリ風（サンセット/サンド系） */
+  --ink: #2b2017;
+  --ink-soft: #6d5d4e;
+  --muted: #ab9b89;
+  --line: #f1e7da;
+  --bg: #fdf8f1;
   --card: #ffffff;
-  --brand: #4f46e5;
-  --brand-2: #0ea5e9;
-  --brand-ink: #4338ca;
-  --accent: #f97316;
-  --ok: #15803d;
-  --ok-bg: #f0fdf4;
+  --brand: #f2683c; /* コーラル */
+  --brand-2: #f7a23c; /* アンバー */
+  --brand-ink: #c2410c; /* バーントオレンジ（文字・リンク） */
+  --accent: #e8623a;
+  --ok: #16a34a;
+  --ok-bg: #f1fbf3;
   --err: #dc2626;
   --err-bg: #fef2f2;
-  --radius: 16px;
-  --shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.18);
-  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --radius: 18px;
+  --shadow: 0 16px 36px -16px rgba(146, 84, 46, 0.26);
+  --shadow-sm: 0 2px 12px rgba(146, 84, 46, 0.09);
 }
 
 * {
@@ -43,7 +44,7 @@ a {
 /* ---------- Hero ---------- */
 .hero {
   position: relative;
-  background: radial-gradient(120% 120% at 0% 0%, #6366f1 0%, #4f46e5 38%, #0ea5e9 100%);
+  background: radial-gradient(135% 135% at 0% 0%, #ffb27a 0%, #f2683c 46%, #ef5a6b 100%);
   color: #fff;
   padding: 60px 20px 84px;
   overflow: hidden;
