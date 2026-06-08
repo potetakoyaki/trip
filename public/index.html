@@ -61,8 +61,16 @@
 
     <main>
       <section class="card form-card">
+        <div class="mode-tabs" role="tablist">
+          <button type="button" id="tab-manual" class="mode-tab active">✍️ 自分で決める</button>
+          <button type="button" id="tab-auto" class="mode-tab">🎲 おまかせ（行き先もAI）</button>
+        </div>
+        <p id="auto-note" class="auto-note hidden">
+          🎲 行き先はAIが提案します。出発地・交通・予算・日数・気分などを入れて「行き先を提案」を押してください。
+        </p>
+        <div id="suggest-results" class="suggest-results hidden"></div>
         <form id="plan-form">
-          <div class="field">
+          <div class="field" id="area-field">
             <label for="area">エリア・行き先</label>
             <div class="autocomplete">
               <input type="text" id="area" placeholder="例: 萩 / 京都 / 神奈川県（ひらがなでもOK）" autocomplete="off" required />
