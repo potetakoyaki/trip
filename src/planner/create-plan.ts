@@ -20,9 +20,26 @@ export interface CreatePlanResult {
  * プラン作成の中核。/api/plan（同期）とバックグラウンドジョブの両方から使う。
  * 自動収集 → 候補取得 → 楽天ホテル → AI提案 → 保存 までを行う。
  */
-export async function createPlan(env: Env, body: PlanRequest, origin?: string): Promise<CreatePlanResult> {
+export async function createPlan(
+  env: Env,
+  body: PlanRequest,
+  origin?: string,
+  onProgress?: (stage: string, progress: number) => void | Promise<void>,
+): Promise<CreatePlanResult> {
+  // 進捗報告のヘルパー（失敗してもプラン作成は止めない）。
+  const report = async (stage: string, progress: number) => {
+    if (!onProgress) return;
+    try {
+      await onProgress(stage, progress);
+    } catch {
+      /* 進捗の更新失敗は致命的でない */
+    }
+  };
+
+  await report('情報を準備しています…', 8);
   let scrape: { ran: boolean; total?: number; results?: unknown } = { ran: false };
   if (body.autoScrape !== false) {
+    await report('最新情報を確認中…', 15);
     const summary = await runScrape(env);
     scrape = { ran: true, total: summary.total, results: summary.results };
   }
@@ -41,11 +58,13 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
     // 収集済みスポットが少なくても、既存データだけでプラン化を試みる。
     const alreadyCovered = await isCovered(env.DB, body.area, '');
     if (!alreadyCovered) {
+      await report('スポット情報を集めています…', 30);
       try {
         discovered = await discoverAndScrape(env, {
           area: body.area,
           interests: body.interests,
           keyword: body.keyword,
+          onExtractStart: () => report('スポット情報を抽出中…', 50),
         });
       } catch {
         discovered = { total: 0, docs: [] };
@@ -63,6 +82,7 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
     }
   }
 
+  await report('情報を整理して宿泊先を検索中…', 68);
   let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
   try {
     realHotels = await fetchRakutenHotels(env, body.area, origin, {
@@ -74,6 +94,7 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
     realHotels = [];
   }
 
+  await report('AIがプランを組み立て中…', 82);
   const plan = await generatePlan(env, events, body, { hotels: realHotels });
 
   // スポットが1件も組み込めなかった場合は、情報取得に失敗している可能性が高い。
@@ -85,6 +106,7 @@ export async function createPlan(env: Env, body: PlanRequest, origin?: string): 
     );
   }
 
+  await report('天気を取得して仕上げ中…', 95);
   // 旅行日の天気予報（無料・キー不要）。取得できたら付与。
   try {
     const forecast = await fetchForecast(body.area ?? '', body.startDate, body.endDate);

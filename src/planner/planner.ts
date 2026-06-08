@@ -1,6 +1,7 @@
 import type { Env, EventRecord, HotelOption, Plan, PlanRequest } from '../types';
 import { generateRulePlan } from './rule-based';
 import { generateAiPlan, AiQuotaError } from './ai';
+import { geminiEnabled } from './gemini';
 
 export interface PlanOptions {
   /** 実在ホテル（楽天等）。あれば AI 概算より優先する。 */
@@ -20,7 +21,7 @@ export async function generatePlan(
   opts: PlanOptions = {},
 ): Promise<Plan> {
   let plan: Plan;
-  if (req.engine !== 'rule' && env.AI) {
+  if (req.engine !== 'rule' && (env.AI || geminiEnabled(env))) {
     try {
       plan = await generateAiPlan(env, events, req, opts);
     } catch (e) {

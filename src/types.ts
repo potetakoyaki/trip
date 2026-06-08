@@ -14,6 +14,11 @@ export interface Env {
   BRAVE_API_KEY?: string;
   /** Jina API キー（任意・カード不要の無料キーで上限アップ）。 */
   JINA_API_KEY?: string;
+  /** Google Gemini API キー（任意）。設定すると抽出・プラン生成を Gemini で行い、
+   *  Cloudflare Workers AI のニューロン枠（4006）に依存しなくなる。未設定なら Workers AI を使う。 */
+  GEMINI_API_KEY?: string;
+  /** 使用する Gemini モデル名（任意・既定 gemini-2.0-flash）。 */
+  GEMINI_MODEL?: string;
 }
 
 /** スクレイパが返す正規化済みイベント（DB保存前）。 */

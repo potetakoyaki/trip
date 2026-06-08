@@ -28,7 +28,15 @@ const BROWSER_UA =
  */
 export async function discoverAndScrape(
   env: Env,
-  opts: { area: string; interests?: string[]; keyword?: string; queries?: string[]; maxPages?: number },
+  opts: {
+    area: string;
+    interests?: string[];
+    keyword?: string;
+    queries?: string[];
+    maxPages?: number;
+    /** 本文取得が終わり、AI抽出（重い工程）を始める直前に呼ばれる。進捗表示用。 */
+    onExtractStart?: () => void | Promise<void>;
+  },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
   const empty: DiscoverResult = { total: 0, docs: [], stats: { candidates: 0, fetched: 0, engine: null } };
@@ -96,34 +104,34 @@ export async function discoverAndScrape(
     };
   }
 
-  // 3) AI でスポット抽出（ページごとに並列実行して時間短縮）→ 保存
+  // 3) AI でスポット抽出 → 保存。
+  // 同時実行は3本までに抑える（無料AI枠のレート制限＝特にGeminiの429を避けるため）。
+  if (opts.onExtractStart) await opts.onExtractStart();
   const scrapedAt = new Date().toISOString();
-  const perDoc = await Promise.all(
-    docs.map(async (doc) => {
-      try {
-        const spots = await extractSpots(env, doc.text.slice(0, 6000), { area, interests: opts.interests });
-        const events: NormalizedEvent[] = [];
-        for (const s of spots) {
-          const title = (s.title ?? '').trim();
-          if (!title) continue;
-          events.push({
-            sourceEventId: `${doc.url}#${title}`,
-            title,
-            description: s.description?.trim() || undefined,
-            url: doc.url,
-            category: s.category || inferCategory(title, s.description) || '観光',
-            prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
-            city: s.city || area,
-            hours: s.hours?.trim() || undefined,
-            raw: { from: doc.source, area },
-          });
-        }
-        return { source: doc.source, events };
-      } catch {
-        return { source: doc.source, events: [] as NormalizedEvent[] };
+  const perDoc = await mapLimit(docs, 3, async (doc) => {
+    try {
+      const spots = await extractSpots(env, doc.text.slice(0, 6000), { area, interests: opts.interests });
+      const events: NormalizedEvent[] = [];
+      for (const s of spots) {
+        const title = (s.title ?? '').trim();
+        if (!title) continue;
+        events.push({
+          sourceEventId: `${doc.url}#${title}`,
+          title,
+          description: s.description?.trim() || undefined,
+          url: doc.url,
+          category: s.category || inferCategory(title, s.description) || '観光',
+          prefecture: s.prefecture || inferPrefecture(title, s.description, s.city),
+          city: s.city || area,
+          hours: s.hours?.trim() || undefined,
+          raw: { from: doc.source, area },
+        });
       }
-    }),
-  );
+      return { source: doc.source, events };
+    } catch {
+      return { source: doc.source, events: [] as NormalizedEvent[] };
+    }
+  });
 
   let total = 0;
   for (const { source, events } of perDoc) {
@@ -136,6 +144,20 @@ export async function discoverAndScrape(
     stats: { candidates, fetched: docs.length, engine },
     note: total === 0 ? 'ページは取得できたが、AIがスポットを抽出できませんでした。' : undefined,
   };
+}
+
+/** 同時実行数を limit に抑えて配列を非同期マップする（順序は保持）。 */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length || 1) }, async () => {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 /** Jina 検索（s.jina.ai）。検索結果に本文content付きで返る。 */

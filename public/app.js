@@ -818,48 +818,30 @@ function refinePlan(instruction) {
   startPlan();
 }
 
-const PLAN_STAGES = [
-  '情報を集めています…（大手サイト・ブログ）',
-  'AIがスポットを抽出中…',
-  '日程・ホテル・費用を計算中…',
-  '仕上げています…',
-];
-let planStageTimer = null;
-let planPct = 0;
-let planStageIdx = 0;
+let planLastPct = 0;
 
-// プラン作成はサーバー側がジョブ方式で、細かい進捗を返さない。そのため時間ベースで
-// 滑らかに増える推定％を表示する（序盤は速く・後半はゆっくり、96%で頭打ち）。
-// 完了は呼び出し側が hideProgressBar() で消す。
+// プラン作成の進捗は、サーバー(/plan-status)が返す実ステージ(stage/progress)を表示する。
+// 重い工程（抽出・AI組み立て）は1回の処理待ちなので、その間は実%のまま“流れる”
+// アニメ（.working）で「動作中」を示す。偽の時間ベースバーは廃止。
 function startPlanProgress() {
-  planStageIdx = 0;
-  planPct = 3;
-  setPlanProgress(PLAN_STAGES[0], planPct);
-  let ticks = 0;
-  if (planStageTimer) clearInterval(planStageTimer);
-  planStageTimer = setInterval(() => {
-    ticks++;
-    const step = planPct < 60 ? 2.5 : planPct < 85 ? 0.9 : 0.3;
-    planPct = Math.min(96, planPct + step);
-    if (ticks % 10 === 0) planStageIdx = (planStageIdx + 1) % PLAN_STAGES.length; // 約4.5秒ごとに表示を進める
-    setPlanProgress(PLAN_STAGES[planStageIdx], planPct);
-  }, 450);
+  planLastPct = 4;
+  setRealPlanProgress('プラン作成を開始しています…', planLastPct);
 }
 function stopPlanProgress() {
-  if (planStageTimer) {
-    clearInterval(planStageTimer);
-    planStageTimer = null;
-  }
+  /* タイマーは持たない（実進捗ベース）。互換のため関数は残す。 */
 }
-// プラン作成中の進捗バー（％表記つき）。
-function setPlanProgress(label, pct) {
+// label と pct（0-100）でプラン進捗バーを更新する。pct は後退させない。
+function setRealPlanProgress(label, pct) {
   const wrap = $('collect-progress');
   wrap.classList.remove('hidden', 'done');
   const fill = $('cp-fill');
   fill.classList.remove('indet');
-  fill.style.width = Math.round(pct) + '%';
-  $('cp-label').innerHTML = `<span class="cp-spin"></span>${esc(label)}`;
-  $('cp-count').textContent = Math.round(pct) + '%';
+  fill.classList.add('working'); // 流れるアニメ＝処理中（固まって見えない）
+  const next = Math.max(planLastPct, Math.min(100, Math.round(pct || 0)));
+  planLastPct = next;
+  fill.style.width = next + '%';
+  $('cp-label').innerHTML = `<span class="cp-spin"></span>${esc(label || '作成中…')}`;
+  $('cp-count').textContent = next + '%';
 }
 function showIndet(label) {
   const wrap = $('collect-progress');
@@ -877,8 +859,9 @@ function hideProgressBar() {
   const wrap = $('collect-progress');
   wrap.classList.add('hidden');
   const fill = $('cp-fill');
-  fill.classList.remove('indet');
+  fill.classList.remove('indet', 'working');
   fill.style.width = '0%';
+  planLastPct = 0;
 }
 
 async function pollPlanJob(jobId, gen) {
@@ -924,7 +907,11 @@ async function pollPlanJob(jobId, gen) {
       setStatus('作成に失敗: ' + (s.error || '不明なエラー'), 'err');
       return;
     }
-    await sleep(3000);
+    // 進行中：サーバーが報告する実ステージ進捗を表示する。
+    if (s.found && s.status === 'pending') {
+      setRealPlanProgress(s.stage || 'プランを作成中…', s.progress || planLastPct);
+    }
+    await sleep(2500);
   }
   stopPlanProgress();
   hideProgressBar();

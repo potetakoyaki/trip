@@ -19,3 +19,10 @@ BRAVE_API_KEY=
 # Jina API キー（任意・カード不要の無料キーで上限アップ）
 # https://jina.ai/ のトップに無料キーが表示される。未設定でも自動収集は動作する。
 JINA_API_KEY=
+
+# Google Gemini API キー（任意・推奨）。設定するとスポット抽出・プラン生成を
+# Gemini で行い、Cloudflare Workers AI のニューロン枠(4006)に依存しなくなる。
+# https://aistudio.google.com/apikey で無料取得。未設定なら Workers AI を使う。
+GEMINI_API_KEY=
+# 使用モデル（任意・未指定は gemini-2.0-flash）
+GEMINI_MODEL=
