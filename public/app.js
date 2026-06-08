@@ -975,22 +975,20 @@ function renderPlan(data) {
   const highlights = (plan.highlights || []).length
     ? `<div class="highlights">${plan.highlights.map((h) => `<span class="tag">★ ${esc(h)}</span>`).join('')}</div>`
     : '';
-  // 選定理由・楽しみ方（プランナーの意図）
-  const rationale = plan.rationale
-    ? `<div class="why-card"><div class="why-h">🧩 なぜこのプランか</div><p>${esc(plan.rationale)}</p></div>`
-    : '';
+  // 全体の楽しみ方（プランナーの意図）。「なぜこのプランか」は表示しない。
   const enjoyment = plan.enjoyment
     ? `<div class="why-card enjoy"><div class="why-h">✨ このプランの楽しみ方</div><p>${esc(plan.enjoyment)}</p></div>`
     : '';
   const advice = (plan.advice || []).length
     ? `<div class="advice"><div class="advice-h">🧭 上手く回るコツ</div><ul>${plan.advice
+        .slice(0, 2)
         .map((a) => `<li>${esc(a)}</li>`)
         .join('')}</ul></div>`
     : '';
 
   const notice = plan.notice ? `<div class="plan-notice">⚠️ ${esc(plan.notice)}</div>` : '';
   let html = `<div class="summary-box">${notice}${theme}${summaryText}${highlights}</div>`;
-  html += rationale + enjoyment;
+  html += enjoyment;
   if (plan.forecast && plan.forecast.length) html += renderForecast(plan.forecast);
   if (plan.travel) html += renderTravel(plan.travel);
   if (plan.costBreakdown) html += renderCost(plan.costBreakdown);
@@ -1617,8 +1615,9 @@ function renderItem(it, dayIndex, idx, count, clock) {
   if (cost != null) meta.push(`<span class="item-price">${cost === 0 ? '無料' : '目安 ' + yen(cost)}</span>`);
 
   const detail = [];
-  if (it.why) detail.push(`<p class="why"><b>💡 おすすめ</b>${esc(it.why)}</p>`);
-  if (it.tips) detail.push(`<p class="tips"><b>🎯 楽しみ方</b>${esc(it.tips)}</p>`);
+  // 「おすすめ」と「楽しみ方」は1つの「オススメの楽しみ方」に統合（重複回避）。
+  const enjoy = it.why || it.tips;
+  if (enjoy) detail.push(`<p class="why"><b>💡 オススメの楽しみ方</b>${esc(enjoy)}</p>`);
   if (it.access) detail.push(`<p class="access"><b>🚃 行き方</b>${esc(it.access)}</p>`);
   const sub = [];
   if (it.duration) sub.push(`⏱ 滞在目安 ${esc(it.duration)}`);

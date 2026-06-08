@@ -1,6 +1,7 @@
 import type { Env, Plan, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
+import { geocodePlanItems } from '../scrape/geocode';
 import { fetchRakutenHotels } from '../scrape/hotels';
 import { searchEvents, savePlan, ensureCoveredTable, isCovered, markCovered } from '../db/repository';
 import { fetchForecast } from '../scrape/weather';
@@ -104,6 +105,14 @@ export async function createPlan(
     throw new Error(
       'スポット情報を取得できませんでした（情報元のAPIエラー、またはこのエリアの情報が少ない可能性があります）。エリア名をもう少し具体的にするか、時間をおいて再度お試しください。',
     );
+  }
+
+  // 地図用に各スポットの実座標を取得（AIの推測座標を上書き。ベストエフォート）。
+  await report('地図の座標を取得中…', 90);
+  try {
+    await geocodePlanItems(env, plan.days.flatMap((d) => d.items), body.area);
+  } catch {
+    /* 座標取得の失敗はプラン全体を止めない */
   }
 
   await report('天気を取得して仕上げ中…', 95);
