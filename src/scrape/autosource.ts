@@ -298,11 +298,33 @@ function walkerplusUrlsForCode(code: string): string[] {
 }
 
 /**
- * Walker Plus 全国インデックスを直接取得し、その県の ar コードからリストURLを得る。
- * Jina非依存（直接取得が弾かれた時だけ Jina(html) にフォールバック）。発見できれば[]以外。
+ * 生HTMLを取得する（JSON-LDの有無を問わない）。Walker Plusのインデックス等、ナビだけの
+ * ページ用。直接取得を最優先（walkerplusはサーバー直取得が通る）。空/失敗時のみ Jina(html)。
+ * ※ fetchEventHtml は ld+json を含むページだけを「直接成功」とみなすため、ld+jsonを持たない
+ *   インデックスでは使えない（Jina枯渇に巻き込まれる）。ここは専用の素直な直接取得にする。
+ */
+async function fetchPlainHtml(http: HttpClient, env: Env, url: string): Promise<string> {
+  try {
+    const html = await http.getText(url, { skipRobots: true });
+    if (html) return html;
+  } catch {
+    /* 直接取得失敗 → Jina へ */
+  }
+  try {
+    const headers: Record<string, string> = { 'X-Return-Format': 'html' };
+    if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
+    return (await http.getText(`https://r.jina.ai/${url}`, { skipRobots: true, headers })) || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Walker Plus 全国インデックスを「生HTMLで」直接取得し、その県の ar コードからリストURLを得る。
+ * インデックスは JSON-LD を持たないので fetchPlainHtml で取る（＝Jina非依存・枯渇に巻き込まれない）。
  */
 async function discoverWalkerplusFromIndex(http: HttpClient, env: Env, prefecture: string): Promise<string[]> {
-  const { html } = await fetchEventHtml(http, env, 'https://www.walkerplus.com/event_list/');
+  const html = await fetchPlainHtml(http, env, 'https://www.walkerplus.com/event_list/');
   if (!html) return [];
   const code = findWalkerplusArCode(html, prefecture);
   return code ? walkerplusUrlsForCode(code) : [];
