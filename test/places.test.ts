@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { searchPlaces } from '../src/data/places';
+import { searchPlaces, prefectureOf } from '../src/data/places';
+
+describe('prefectureOf 地名→都道府県の解決', () => {
+  it('市区町村名から逆引き（出雲市→島根県）', () => {
+    expect(prefectureOf('出雲市')).toBe('島根県');
+    expect(prefectureOf('松江市')).toBe('島根県');
+  });
+  it('都道府県名を含む文字列', () => {
+    expect(prefectureOf('島根県松江市')).toBe('島根県');
+    expect(prefectureOf('東京都')).toBe('東京都');
+  });
+  it('県名の前方一致（島根→島根県）', () => {
+    expect(prefectureOf('島根')).toBe('島根県');
+  });
+  it('解決できなければ undefined', () => {
+    expect(prefectureOf('')).toBeUndefined();
+  });
+});
 
 describe('searchPlaces 地名オートコンプリート', () => {
   it('漢字の市名でヒット（萩→山口県萩市）', () => {

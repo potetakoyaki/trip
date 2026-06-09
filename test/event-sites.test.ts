@@ -1,0 +1,145 @@
+import { describe, it, expect } from 'vitest';
+import {
+  isEventSiteHost,
+  buildEventQueries,
+  isPastEventDate,
+  pageUrlFor,
+  findWalkerplusArCode,
+  walkerplusArCode,
+} from '../src/scrape/autosource';
+import { parseJsonLdEvents } from '../src/scrape/jsonld';
+
+describe('walkerplusArCode: 県→ar コード組み立て（ar+地方2桁+JIS2桁）', () => {
+  it('実データで確認済みの県コードを正しく組み立てる', () => {
+    expect(walkerplusArCode('東京都')).toBe('ar0313');
+    expect(walkerplusArCode('神奈川県')).toBe('ar0314');
+    expect(walkerplusArCode('島根県')).toBe('ar0832');
+    expect(walkerplusArCode('香川県')).toBe('ar0937');
+  });
+  it('北海道・沖縄も組み立てる', () => {
+    expect(walkerplusArCode('北海道')).toBe('ar0101');
+    expect(walkerplusArCode('沖縄県')).toBe('ar1047');
+  });
+  it('不明な県名は null', () => {
+    expect(walkerplusArCode('架空県')).toBeNull();
+  });
+});
+
+describe('isEventSiteHost: イベント情報サイトの判定', () => {
+  it('ウォーカープラス（サブドメイン含む）を認識する', () => {
+    expect(isEventSiteHost('www.walkerplus.com')).toBe(true);
+    expect(isEventSiteHost('hanabi.walkerplus.com')).toBe(true);
+    expect(isEventSiteHost('walkerplus.com')).toBe(true);
+  });
+
+  it('他のイベントサイトも認識する', () => {
+    expect(isEventSiteHost('www.iko-yo.net')).toBe(true);
+    expect(isEventSiteHost('www.jorudan.co.jp')).toBe(true);
+  });
+
+  it('無関係なドメインや紛らわしい名前は弾く', () => {
+    expect(isEventSiteHost('example.com')).toBe(false);
+    expect(isEventSiteHost('notwalkerplus.com')).toBe(false);
+  });
+});
+
+describe('buildEventQueries: イベント検索クエリ', () => {
+  it('ウォーカープラスを最優先に当て、季節イベントも含む', () => {
+    const qs = buildEventQueries('出雲市', 8);
+    expect(qs[0]).toContain('walkerplus'); // 最優先
+    expect(qs.filter((q) => q.includes('walkerplus')).length).toBeGreaterThanOrEqual(2);
+    // 8月は夏祭り/花火の季節キーワードが入る
+    expect(qs.some((q) => q.includes('夏祭り') || q.includes('花火'))).toBe(true);
+  });
+
+  it('クエリ数は絞る（検索の利用制限対策）', () => {
+    expect(buildEventQueries('松江市', 8).length).toBeLessThanOrEqual(4);
+  });
+
+  it('月なし/範囲外でもwalkerplus狙い＋保険クエリを返す', () => {
+    expect(buildEventQueries('金沢市').some((q) => q.includes('walkerplus'))).toBe(true);
+    expect(buildEventQueries('金沢市')).toContain('金沢市 イベント 開催');
+    expect(buildEventQueries('金沢市', 13).some((q) => q.includes('walkerplus'))).toBe(true);
+  });
+});
+
+describe('pageUrlFor: ページ送りURL生成', () => {
+  const base = 'https://www.walkerplus.com/event_list/ar0832/';
+  it('p<=1 はベース、p>=2 は N.html を付ける', () => {
+    expect(pageUrlFor(base, 1)).toBe(base);
+    expect(pageUrlFor(base, 2)).toBe(`${base}2.html`);
+    expect(pageUrlFor(base, 8)).toBe(`${base}8.html`);
+  });
+
+  it('クエリ付き/末尾が非スラッシュのURLは段送り不可で null', () => {
+    expect(pageUrlFor('https://x.com/a?b=1', 2)).toBeNull();
+    expect(pageUrlFor('https://x.com/detail/e001', 2)).toBeNull();
+    // p<=1 は段送りせずベースを返す
+    expect(pageUrlFor('https://x.com/detail/e001', 1)).toBe('https://x.com/detail/e001');
+  });
+});
+
+describe('findWalkerplusArCode: インデックスHTMLから県コードを引く', () => {
+  const html = `
+    <ul class="area-nav">
+      <li><a href="/event_list/ar0101/">北海道</a></li>
+      <li><a href="/event_list/ar0313/">東京</a></li>
+      <li><a href="/event_list/ar0314/">神奈川</a></li>
+      <li><a href="/event_list/ar0626/">京都</a></li>
+      <li><a href="/event_list/ar0832/">島根</a></li>
+    </ul>`;
+  it('県名（接尾辞あり）からコードを引く', () => {
+    expect(findWalkerplusArCode(html, '島根県')).toBe('ar0832');
+    expect(findWalkerplusArCode(html, '東京都')).toBe('ar0313');
+    expect(findWalkerplusArCode(html, '京都府')).toBe('ar0626');
+    expect(findWalkerplusArCode(html, '神奈川県')).toBe('ar0314');
+  });
+  it('北海道（接尾辞なし扱い）も引ける', () => {
+    expect(findWalkerplusArCode(html, '北海道')).toBe('ar0101');
+  });
+  it('該当が無ければ null', () => {
+    expect(findWalkerplusArCode(html, '沖縄県')).toBeNull();
+    expect(findWalkerplusArCode('<p>no links</p>', '東京都')).toBeNull();
+  });
+});
+
+describe('isPastEventDate: 過去イベントの判定', () => {
+  const today = '2026-06-09';
+  it('終了日が今日より前なら過去', () => {
+    expect(isPastEventDate({ startAt: '2025-08-09T00:00:00.000Z', endAt: '2025-08-09T00:00:00.000Z' }, today)).toBe(true);
+  });
+  it('終了日が今日以降なら過去でない', () => {
+    expect(isPastEventDate({ startAt: '2026-08-01T00:00:00.000Z', endAt: '2026-08-02T00:00:00.000Z' }, today)).toBe(false);
+  });
+  it('開催中（開始は過去・終了は未来）は残す', () => {
+    expect(isPastEventDate({ startAt: '2026-05-23T00:00:00.000Z', endAt: '2026-09-26T00:00:00.000Z' }, today)).toBe(false);
+  });
+  it('日付不明は過去扱いしない', () => {
+    expect(isPastEventDate({}, today)).toBe(false);
+  });
+});
+
+describe('parseJsonLdEvents: ウォーカープラス風のEvent JSON-LD', () => {
+  it('開催日・場所つきイベントを取り出す', () => {
+    const script = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'Event',
+      name: '出雲大社 神在祭',
+      startDate: '2026-11-20',
+      endDate: '2026-11-27',
+      url: 'https://www.walkerplus.com/event/ar0832e000001/',
+      location: {
+        '@type': 'Place',
+        name: '出雲大社',
+        address: { '@type': 'PostalAddress', addressRegion: '島根県', addressLocality: '出雲市' },
+      },
+    });
+    const events = parseJsonLdEvents([script]);
+    expect(events).toHaveLength(1);
+    const ev = events[0];
+    expect(ev.title).toBe('出雲大社 神在祭');
+    expect(ev.startAt?.slice(0, 10)).toBe('2026-11-20');
+    expect(ev.prefecture).toBe('島根県');
+    expect(ev.city).toBe('出雲市');
+  });
+});

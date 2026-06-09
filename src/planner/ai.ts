@@ -120,11 +120,14 @@ export async function generateAiPlan(
   req: PlanRequest,
   opts: { hotels?: import('../types').HotelOption[] } = {},
 ): Promise<Plan> {
-  // Gemini か Workers AI のどちらも使えない、または候補が無いときはルールベース。
-  if ((!env.AI && !geminiEnabled(env)) || events.length === 0) return generateRulePlan(events, req);
+  // Gemini も Workers AI も無いときだけルールベース。
+  // 収集スポットが空(events.length===0)でも、AIには一般知識から実在の名所を出させる
+  // （ここで諦めると「スポット情報を取得できませんでした」になってしまうため、AIで作り切る）。
+  if (!env.AI && !geminiEnabled(env)) return generateRulePlan(events, req);
 
   const dates = enumerateDates(req.startDate, req.endDate);
   const nights = Math.max(0, dates.length - 1);
+  const isDayTrip = nights === 0; // 日帰り（宿泊なし）。
   const perDay = PER_DAY[req.pace ?? 'normal'];
 
   const byTitle = new Map<string, EventRecord>();
@@ -145,15 +148,23 @@ export async function generateAiPlan(
     .filter((t) => !have.has(t))
     .map((title) => ({ title, category: undefined, area: req.area, price: undefined, desc: '行きたいスポット（必ず含める）' }));
   const candidates = [...mustCands, ...baseCands];
+  // 「行きたい」スポット名の集合（1日あたりの件数上限で取りこぼさないため）。
+  const mustSet = new Set(mustInclude);
 
-  const sys =
-    'あなたは経験豊富な旅行コンシェルジュです。観光スポットは与えられた候補から選びます。ただし飲食店・カフェ、ホテル、移動・費用の目安は一般知識で補ってよいです。魅力的で現実的な旅行プランをJSONで作成し、各項目は具体的で実用的に書きます。費用はすべて1人あたりの円の目安です。';
+  const hasCandidates = candidates.length > 0;
+  const sys = hasCandidates
+    ? 'あなたは経験豊富な旅行コンシェルジュです。観光スポットは与えられた候補から優先的に選びます。候補で足りない分や、飲食店・カフェ、ホテル、移動・費用の目安は一般知識で補ってよいです。魅力的で現実的な旅行プランをJSONで作成し、各項目は具体的で実用的に書きます。費用はすべて1人あたりの円の目安です。'
+    : 'あなたは経験豊富な旅行コンシェルジュです。今回は収集データがないので、その土地について実在する定番の名所・体験・名物グルメ・宿を、あなたの一般知識から正確に挙げてプランを組み立てます。実在しない場所は絶対に作りません。魅力的で現実的な旅行プランをJSONで作成し、各項目は具体的で実用的に書きます。費用はすべて1人あたりの円の目安です。';
 
   const cond: string[] = [];
   if (req.area) cond.push(`旅行先エリア: ${req.area}`);
   if (req.origin) cond.push(`出発地点: ${req.origin}`);
   if (req.transport) cond.push(`移動手段: ${req.transport}`);
-  cond.push(`日程: ${dates.length}日間 / ${nights}泊（${dates[0]} 〜 ${dates[dates.length - 1]}）`);
+  cond.push(
+    isDayTrip
+      ? `日程: 日帰り（${dates[0]}・宿泊なし）。その日のうちに出発地へ帰る前提で、戻りの移動時間も考慮して無理なく組む。夜遅い予定や宿泊前提の項目は入れない。`
+      : `日程: ${dates.length}日間 / ${nights}泊（${dates[0]} 〜 ${dates[dates.length - 1]}）`,
+  );
   cond.push(`1日あたり ${perDay} 件程度`);
   if (req.interests?.length) cond.push(`興味: ${req.interests.join('、')}`);
   if (req.budget) cond.push(`予算(滞在費＋ホテル)の目安: 1人 ${req.budget.toLocaleString()}円`);
@@ -170,20 +181,33 @@ export async function generateAiPlan(
     ? `- travel: 「${req.origin}」から「${req.area ?? '旅行先'}」へ${req.transport ?? '公共交通機関'}で行く場合の目安。mode(手段), distance(距離の目安 例"80km"), duration(片道の所要 例"約90分"), costRoundTrip(往復の目安・円の数値), note(具体的な経路・乗換・路線/高速道路名など)。`
     : '- travel: 出発地が未指定なので省略可。';
 
+  // 候補があるときはそれを渡し title 一致を求める。無いときは一般知識で実在の名所を出させる。
+  const candidateBlock = hasCandidates
+    ? ['— 候補スポット（観光/グルメ等。titleは候補と完全一致で使う） —', JSON.stringify(candidates, null, 0)]
+    : [
+        '— 候補スポット —',
+        `（「${req.area ?? 'この地域'}」の収集データは今回ありません。あなたの一般知識から、実在する定番の名所・名物・体験・人気グルメだけを挙げてプランを作ってください。実在しない場所は絶対に作らないこと。）`,
+      ];
+  const titleRule = hasCandidates ? 'title(候補と一致)' : 'title(実在する場所の正式名称)';
+  const pickRule = hasCandidates
+    ? '- 観光スポットは候補から選び、同じ場所を重複させない。'
+    : '- 観光スポットはその土地で実在する名所・人気スポットを一般知識から正確に選び、同じ場所を重複させない。';
+
   const user = [
     '次の条件と候補から、費用と移動つきの旅行プランを作ってください。',
     '— 条件 —',
     ...cond,
-    '— 候補スポット（観光/グルメ等。titleは候補と完全一致で使う） —',
-    JSON.stringify(candidates, null, 0),
+    ...candidateBlock,
     '— 出力要件（1人あたり・円。自然な文章で具体的に） —',
     '- theme: 全体のキャッチーなテーマ',
     '- enjoyment: このプラン全体をどう楽しむか「楽しみ方の提案」を150〜250字で。五感・季節・時間帯・組み合わせの妙など具体的に。',
     '- advice: 上手く回るコツを2個だけ（内容が重複しない、簡潔で具体的なものを厳選）',
     travelReq,
-    `- hotels: 「${req.area ?? '旅行先'}」の宿泊先を2〜3件（候補に宿泊系があれば優先、無ければ定番を一般知識で）。各 name, area, nightlyPrice(1泊1人の目安・円の数値), why(おすすめ理由)。`,
+    isDayTrip
+      ? '- hotels: 日帰りなので宿泊先は不要。hotels は空配列 [] にする。'
+      : `- hotels: 「${req.area ?? '旅行先'}」の宿泊先を2〜3件（候補に宿泊系があれば優先、無ければ定番を一般知識で）。各 name, area, nightlyPrice(1泊1人の目安・円の数値), why(おすすめ理由)。`,
     '- days[].theme: その日のねらい',
-    '- days[].items[]: title(候補と一致), time(例"10:00"), category,',
+    `- days[].items[]: ${titleRule}, time(例"10:00"), category,`,
     '   why(このスポットのオススメの楽しみ方を40〜70字で簡潔に。名物・回り方・ベスト時間帯のうち要点だけ。同じ語の繰り返しは避ける),',
     '   access(行き方を一言), duration(滞在目安), alt(代替案),',
     '   estCost(その場所で1人が実際に使う費用の現実的な目安・円の数値。観光施設は入場料の実費、無料スポットは0。飲食店は ランチ1000〜2500・カフェ500〜1200・ディナー3000〜6000 を目安に内容相応で。安易に0や極端に低い額にしない),',
@@ -191,7 +215,7 @@ export async function generateAiPlan(
     '   lat,lng(その場所のおおよその緯度・経度の数値。移動時間の概算に使う)。',
     '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、why に名物料理・おすすめメニュー・予算感を簡潔に書く。estCost は上記の目安で必ず現実的な金額を入れる（0や数百円にしない）。',
     '  候補に飲食店が少なければ、そのエリアで評判の料理ジャンルや店を一般知識で提案してよい。',
-    '- 観光スポットは候補から選び、同じ場所を重複させない。',
+    pickRule,
     '- 候補に date（開催日）付きのイベント（祭り・花火等）があれば、その date と一致する日の項目に必ず組み込む。',
     '- 各日の項目は移動効率が良い順（地理的に近い場所が連続するよう）に並べ、time もその順で矛盾なく付ける。JSONのみ出力。',
   ].join('\n');
@@ -242,9 +266,23 @@ export async function generateAiPlan(
     try {
       const text = await geminiGenerate(env, sys, user, { maxOutputTokens: 4096 });
       res = { response: text };
-    } catch {
-      // Gemini が失敗したら Workers AI にフォールバック（枠切れなら AiQuotaError）。
-      res = await runWorkersAI();
+    } catch (ge) {
+      if (env.AI) {
+        // Workers AI にフォールバック（枠切れなら AiQuotaError）。
+        res = await runWorkersAI();
+      } else {
+        // Gemini 単独構成（Workers AI 無し）はフォールバック先が無い。
+        // ここで runWorkersAI() を呼ぶと「Workers AIが無効です」という的外れなエラーで
+        // プラン作成が丸ごと失敗する。代わりに収集済みスポットから簡易プランを返し、
+        // 失敗の種別に応じた正直な notice を添える（全滅させない）。
+        const plan = generateRulePlan(events, req);
+        const kind = classifyAiError(ge);
+        plan.notice =
+          kind === 'busy'
+            ? 'AI（Gemini）が混雑していたため、収集済みスポットから簡易プランを作成しました。少し時間をおいて再作成すると、AIによる詳しい提案になります。'
+            : 'AIでのプラン生成に失敗したため、収集済みスポットから簡易プランを作成しました。時間をおいて再度お試しください。';
+        return plan;
+      }
     }
   } else {
     res = await runWorkersAI();
@@ -260,8 +298,19 @@ export async function generateAiPlan(
     const days: PlanDay[] = dates.map((date, i) => {
       const aiDay = parsed.days[i] ?? {};
       const rawItems: any[] = Array.isArray(aiDay.items) ? aiDay.items : [];
+      // 1日あたりの件数上限で切るが、「行きたい」スポットとこの日の開催イベントは
+      // 上限を超えても必ず残す（ユーザーが明示した項目・日付固定の祭り等を取りこぼさない）。
+      const isPriority = (it: any): boolean => {
+        const t = String(it?.title ?? '').trim();
+        if (!t) return false;
+        if (mustSet.has(t) || [...mustSet].some((m) => t.includes(m) || m.includes(t))) return true;
+        const rec = matchRecord(byTitle, t);
+        return !!(rec?.start_at && String(rec.start_at).slice(0, 10) === date);
+      };
+      const capped = rawItems.slice(0, perDay + 1);
+      const extras = rawItems.slice(perDay + 1).filter(isPriority);
       const items: PlanItem[] = [];
-      for (const it of rawItems.slice(0, perDay + 1)) {
+      for (const it of [...capped, ...extras]) {
         const title = String(it?.title ?? '').trim();
         if (!title || used.has(title)) continue;
         used.add(title);
@@ -313,7 +362,8 @@ export async function generateAiPlan(
             why: cleanStr(h.why),
           }))
       : [];
-    const hotels = opts.hotels && opts.hotels.length ? opts.hotels : aiHotels;
+    // 日帰りは宿泊なし。複数日のみホテルを採用する。
+    const hotels = isDayTrip ? [] : opts.hotels && opts.hotels.length ? opts.hotels : aiHotels;
 
     // 移動
     let travel = undefined;

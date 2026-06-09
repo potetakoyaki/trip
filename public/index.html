@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Trip Planner — 旅行プランメーカー</title>
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#f3d678" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Trip Planner" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -68,7 +75,6 @@
         <p id="auto-note" class="auto-note hidden">
           🎲 行き先はAIが提案します。出発地・交通・予算・日数・気分などを入れて「行き先を提案」を押してください。
         </p>
-        <div id="suggest-results" class="suggest-results hidden"></div>
         <form id="plan-form">
           <div class="field" id="area-field">
             <label for="area">エリア・行き先</label>
@@ -108,12 +114,17 @@
             </select>
           </div>
 
+          <label class="switch daytrip-switch">
+            <input type="checkbox" id="dayTrip" />
+            <span>🌅 日帰り（宿泊なし・その日に帰る）</span>
+          </label>
+
           <div class="grid-2">
             <div class="field">
-              <label for="startDate">開始日</label>
+              <label for="startDate" id="startDate-label">開始日</label>
               <input type="date" id="startDate" required />
             </div>
-            <div class="field">
+            <div class="field" id="endDate-field">
               <label for="endDate">終了日</label>
               <input type="date" id="endDate" required />
             </div>
@@ -227,6 +238,8 @@
           <button type="button" id="cancel-btn" class="btn-cancel hidden">✕ キャンセル</button>
         </div>
         <p id="status" class="status"></p>
+        <!-- おまかせモードのAI提案。プラン作成ボタンの下にカードで出す。 -->
+        <div id="suggest-results" class="suggest-results hidden"></div>
       </section>
 
       <section id="result" class="card result-card hidden">
@@ -234,11 +247,13 @@
           <h2 class="section-title">あなたの旅行プラン</h2>
           <div class="result-actions">
             <button type="button" id="save-btn" class="btn-ghost hidden">💾 このプランを保存</button>
+            <button type="button" id="packing-btn" class="btn-ghost hidden">🎒 持ち物リスト</button>
             <button type="button" id="print-btn" class="btn-ghost hidden">🖨 印刷・PDF</button>
             <button type="button" id="share-btn" class="btn-ghost hidden">🔗 リンクをコピー</button>
           </div>
         </div>
         <div id="plan-summary"></div>
+        <div id="packing-box" class="packing-box hidden"></div>
         <div id="plan-eval"></div>
         <div id="plan-map" class="plan-map hidden no-print"></div>
         <div id="plan-days" class="timeline"></div>
@@ -273,5 +288,10 @@
     </div>
 
     <script src="/app.js"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+      }
+    </script>
   </body>
 </html>

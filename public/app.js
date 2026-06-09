@@ -334,6 +334,17 @@ function initDates() {
   $('endDate').value = addDays(start, 1);
 }
 
+// 日帰りモード: 終了日欄を隠して開始日に揃える（宿泊なし）。
+function setDayTrip(on) {
+  const ef = $('endDate-field');
+  if (ef) ef.classList.toggle('hidden', on);
+  const ed = $('endDate');
+  if (ed) ed.required = !on;
+  const lbl = $('startDate-label');
+  if (lbl) lbl.textContent = on ? '日付' : '開始日';
+  if (on && ed) ed.value = $('startDate').value;
+}
+
 async function loadCategories(preselect) {
   try {
     const { categories } = await api('/categories');
@@ -454,6 +465,7 @@ async function loadSharedPlan(id) {
     renderPlan({ plan: d.result });
     $('share-btn').classList.remove('hidden');
     $('print-btn').classList.remove('hidden');
+    $('packing-btn').classList.remove('hidden');
     $('refine-box').classList.remove('hidden');
     setSaveButton(d.saved !== false);
     setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
@@ -749,10 +761,12 @@ function pollCollect(area, gen) {
 }
 
 function buildPlanBody() {
+  const dayTrip = !!($('dayTrip') && $('dayTrip').checked);
   const body = {
     area: $('area').value.trim() || undefined,
     startDate: $('startDate').value,
-    endDate: $('endDate').value,
+    // 日帰りは終了日＝開始日（宿泊なし）。
+    endDate: dayTrip ? $('startDate').value : $('endDate').value,
     interests: [...selectedInterests],
     budget: $('budget').value ? Number($('budget').value) : undefined,
     pace: $('pace').value,
@@ -834,15 +848,20 @@ function submitPlan(ev) {
   else startPlan();
 }
 
+// 直近に提案された行き先（「再考」で除外して別案を出すために保持）。
+let lastSuggested = [];
+
 // おまかせ: 条件から行き先を3案AIに提案させ、カードで表示する。
-async function suggestAreasFlow() {
+// exclude を渡すと、その行き先を避けて別案を出す（再考ボタン用）。
+async function suggestAreasFlow(exclude) {
   const body = buildPlanBody();
   if (!body.startDate || !body.endDate) {
     setStatus('日程を入れてください。', 'err');
     return;
   }
+  if (exclude && exclude.length) body.exclude = exclude;
   setBusy(true);
-  showIndet('AIが行き先を考えています…');
+  showIndet(exclude && exclude.length ? 'AIが別の行き先を考えています…' : 'AIが行き先を考えています…');
   setStatus('条件に合う行き先をAIが3案考えています…', '');
   try {
     const r = await api('/suggest-areas', {
@@ -852,7 +871,10 @@ async function suggestAreasFlow() {
     });
     hideProgressBar();
     setBusy(false);
-    renderSuggestions(r.areas || []);
+    const areas = r.areas || [];
+    // 再考の累積除外: 今回出た案も次の「再考」では避ける。
+    lastSuggested = Array.from(new Set([...(exclude || []), ...areas.map((a) => a.area)]));
+    renderSuggestions(areas);
   } catch (e) {
     hideProgressBar();
     setBusy(false);
@@ -882,7 +904,8 @@ function renderSuggestions(areas) {
         <button type="button" class="btn-secondary suggest-pick" data-i="${i}">この行き先でプランを作成 →</button>
       </div>`;
       })
-      .join('');
+      .join('') +
+    `<button type="button" id="suggest-again" class="btn-secondary suggest-again">🔄 別の案を再考する</button>`;
   box.classList.remove('hidden');
   box.querySelectorAll('.suggest-pick').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -895,6 +918,60 @@ function renderSuggestions(areas) {
       startPlan();
     });
   });
+  // 再考: これまで提案された行き先を除外して別案を出す。
+  const again = $('suggest-again');
+  if (again) again.addEventListener('click', () => suggestAreasFlow(lastSuggested));
+  // プラン作成ボタンの下に出るので、提案までスクロールして見せる。
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 🎒 持ち物リスト: 現在のプラン条件（行き先・日付・天気・予定）からAIに作らせる。
+async function genPacking() {
+  if (!currentPlan) return;
+  const acts = (currentPlan.days || []).flatMap((d) => (d.items || []).map((it) => it.title)).slice(0, 16);
+  const body = {
+    area: $('area').value.trim() || currentArea || undefined,
+    startDate: $('startDate').value,
+    endDate: $('endDate').value,
+    weather: $('weather').value,
+    companions: $('companions').value || undefined,
+    adults: $('adults') ? Number($('adults').value) : undefined,
+    activities: acts,
+  };
+  const box = $('packing-box');
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="info-card"><div class="info-h">🎒 持ち物リスト</div><p class="info-note">AIが作成中…</p></div>';
+  $('packing-btn').disabled = true;
+  try {
+    const r = await api('/packing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    renderPacking(r.groups || []);
+  } catch (e) {
+    box.innerHTML = `<div class="info-card"><div class="info-h">🎒 持ち物リスト</div><p class="info-note">作成に失敗しました: ${esc(e.message)}</p></div>`;
+  } finally {
+    $('packing-btn').disabled = false;
+  }
+}
+
+function renderPacking(groups) {
+  const box = $('packing-box');
+  if (!groups.length) {
+    box.innerHTML =
+      '<div class="info-card"><div class="info-h">🎒 持ち物リスト</div><p class="info-note">うまく生成できませんでした。もう一度お試しください。</p></div>';
+    return;
+  }
+  const list = groups
+    .map(
+      (g) =>
+        `<div class="pack-group"><div class="pack-title">${esc(g.title)}</div>${(g.items || [])
+          .map((it) => `<label class="pack-item"><input type="checkbox" /> <span>${esc(it)}</span></label>`)
+          .join('')}</div>`,
+    )
+    .join('');
+  box.innerHTML = `<div class="info-card"><div class="info-h">🎒 持ち物リスト</div>${list}<p class="info-note">※AIの提案です。チェックして使ってください。</p></div>`;
 }
 
 // 実際にプラン作成ジョブを開始する（フォーム送信・行きたい作成・作り直しから共通で使う）。
@@ -906,6 +983,8 @@ async function startPlan() {
   $('save-btn').classList.add('hidden');
   $('share-btn').classList.add('hidden');
   $('print-btn').classList.add('hidden');
+  $('packing-btn').classList.add('hidden');
+  $('packing-box').classList.add('hidden');
   $('refine-box').classList.add('hidden');
   try {
     await resolveArea($('area').value.trim());
@@ -1080,6 +1159,7 @@ async function loadAndRenderSavedPlan(planId) {
   renderPlan({ plan: d.result });
   $('share-btn').classList.remove('hidden');
   $('print-btn').classList.remove('hidden');
+  $('packing-btn').classList.remove('hidden');
   $('refine-box').classList.remove('hidden');
   setSaveButton(!!d.saved);
   const area = d.request && d.request.area;
@@ -1167,7 +1247,7 @@ function renderPlan(data) {
 function renderPlanDays() {
   if (!currentPlan) return;
   const daysEl = $('plan-days');
-  daysEl.innerHTML = currentPlan.days
+  daysEl.innerHTML = (currentPlan.days || [])
     .map((day, i) => `<div class="day" data-day="${i}">${renderDayInner(day, i)}</div>`)
     .join('');
   renderEval();
@@ -1186,7 +1266,7 @@ function renderMap() {
     return;
   }
   const allPts = [];
-  currentPlan.days.forEach((day) => {
+  (currentPlan.days || []).forEach((day) => {
     (day.items || []).forEach((it) => {
       if (it.lat != null && it.lng != null) allPts.push([it.lat, it.lng]);
     });
@@ -1238,14 +1318,15 @@ function renderDayInner(day, i) {
   const d = new Date(day.date + 'T00:00:00');
   const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
   const dayTheme = day.theme ? `<div class="day-theme">${esc(day.theme)}</div>` : '';
-  const route = dayRouteLink(day.items);
+  const items = day.items || [];
+  const route = dayRouteLink(items);
   let body;
-  if (day.items.length) {
-    const sched = computeSchedule(day.items, currentTransport);
-    body = day.items
+  if (items.length) {
+    const sched = computeSchedule(items, currentTransport);
+    body = items
       .map((it, idx) => {
-        const item = renderItem(it, i, idx, day.items.length, sched.times[idx]);
-        const connector = idx < day.items.length - 1 ? renderConnector(sched.legs[idx]) : '';
+        const item = renderItem(it, i, idx, items.length, sched.times[idx]);
+        const connector = idx < items.length - 1 ? renderConnector(sched.legs[idx]) : '';
         return item + connector;
       })
       .join('');
@@ -1618,10 +1699,16 @@ function renderTravel(t) {
   if (t.duration) bits.push(`片道 ${esc(t.duration)}`);
   if (t.costRoundTrip) bits.push(`往復 ${yen(t.costRoundTrip)}`);
   const mode = t.mode ? `（${esc(t.mode)}）` : '';
+  // 乗換案内：出発地→目的地の公共交通ルート（Googleマップ transit）。
+  const transitLink =
+    t.from && t.to
+      ? `<div class="item-links"><a href="https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(t.from)}&destination=${encodeURIComponent(t.to)}&travelmode=transit" target="_blank" rel="noopener">🚉 乗換案内</a></div>`
+      : '';
   return `<div class="info-card">
     <div class="info-h">🚆 ${esc(t.from || '出発地')} → ${esc(t.to || '目的地')}${mode}</div>
     ${bits.length ? `<div class="pills">${bits.map((b) => `<span class="pill">${b}</span>`).join('')}</div>` : ''}
     ${t.note ? `<p class="info-note">${esc(t.note)}</p>` : ''}
+    ${transitLink}
   </div>`;
 }
 
@@ -1654,10 +1741,12 @@ function renderCostCard() {
 }
 
 function renderCost(c) {
+  // 日帰り（0泊）は宿泊費の行を出さない。
   const hotelLabel = `ホテル${c.nights ? `（${c.nights}泊）` : ''}${c.hotelName ? `・${esc(c.hotelName)}` : ''}`;
   const hotelVal = c.hotelUnknown ? '料金不明' : yen(c.hotel);
+  const hotelRow = c.nights ? `<div class="cost-row"><span>${hotelLabel}</span><span>${hotelVal}</span></div>` : '';
   const rows =
-    `<div class="cost-row"><span>${hotelLabel}</span><span>${hotelVal}</span></div>` +
+    hotelRow +
     `<div class="cost-row"><span>食事</span><span>${yen(c.food)}</span></div>` +
     `<div class="cost-row"><span>観光・体験</span><span>${yen(c.activities)}</span></div>`;
   const stay = `<div class="cost-row total"><span>滞在費合計</span><b>${yen(c.stayTotal)}</b></div>`;
@@ -1763,7 +1852,7 @@ function renderForecast(fc) {
       const pop = day.pop != null ? `☔${day.pop}%` : '';
       return `<div class="fc-day">
         <div class="fc-date">${md}</div>
-        <div class="fc-emoji">${day.emoji}</div>
+        <div class="fc-emoji">${esc(day.emoji)}</div>
         <div class="fc-label">${esc(day.label)}</div>
         <div class="fc-temp">${temp}</div>
         <div class="fc-pop">${pop}</div>
@@ -1862,6 +1951,14 @@ function renderItem(it, dayIndex, idx, count, clock) {
     `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>`,
     `<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式サイト</a>`,
   ];
+  // 口コミ：グルメは食べログ（フリーワード検索＋地名で絞り）、それ以外はGoogleの「口コミ・評判」検索。
+  const cat = it.category || '';
+  const kw = `${it.title} ${it.location || ''}`.trim();
+  if (cat.includes('グルメ') || cat.includes('食') || cat.includes('レストラン') || cat.includes('カフェ')) {
+    links.push(`<a href="https://tabelog.com/rst/rstsearch/?sw=${encodeURIComponent(kw)}" target="_blank" rel="noopener">⭐ 口コミ</a>`);
+  } else {
+    links.push(`<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 口コミ 評判')}" target="_blank" rel="noopener">⭐ 口コミ</a>`);
+  }
   if (it.url) links.push(`<a href="${esc(it.url)}" target="_blank" rel="noopener">📰 情報元</a>`);
 
   return `
@@ -1945,6 +2042,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('collect-btn').addEventListener('click', () => deepCollect(false));
   $('recollect-btn').addEventListener('click', () => deepCollect(true));
   $('share-btn').addEventListener('click', sharePlan);
+  $('packing-btn').addEventListener('click', genPacking);
   $('save-btn').addEventListener('click', saveCurrentPlan);
   $('print-btn').addEventListener('click', () => window.print());
   $('wish-plan-btn').addEventListener('click', genFromWishlist);
@@ -2034,8 +2132,18 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;
-    if (s) $('endDate').value = addDays(s, 1);
+    if (!s) return;
+    if ($('dayTrip') && $('dayTrip').checked) {
+      // 日帰りは終了日＝開始日。
+      $('endDate').value = s;
+      return;
+    }
+    const e = $('endDate').value;
+    // 終了日が未設定 or 開始日より前のときだけ自動補完（既存の複数日設定を壊さない）。
+    if (!e || e < s) $('endDate').value = addDays(s, 1);
   });
+
+  if ($('dayTrip')) $('dayTrip').addEventListener('change', () => setDayTrip($('dayTrip').checked));
 
   loadHistory();
   loadWishlist();

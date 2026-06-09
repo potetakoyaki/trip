@@ -1,9 +1,51 @@
 import type { Env, NormalizedEvent } from '../types';
 import { HttpClient } from './http';
 import { extractReadableText } from './readable';
+import { extractJsonLdScripts, parseJsonLdEvents } from './jsonld';
 import { extractSpots } from './ai-extract';
-import { upsertEvents } from '../db/repository';
+import { upsertEvents, getEventSourceUrls, putEventSourceUrls } from '../db/repository';
 import { inferCategory, inferPrefecture } from '../util/normalize';
+import { prefectureOf } from '../data/places';
+
+/**
+ * Walker Plus のエリアコード = "ar" + 地方番号(2桁) + JISコード(2桁)。
+ * 実データで確認: 東京 ar0313 / 神奈川 ar0314 / 島根 ar0832 / 香川 ar0937。
+ * 中部(04-07)は最善推定だが、組み立てたURLは「実在確認(イベントが取れるか)」してから使うので、
+ * 推定が外れた県は検索にフォールバックする（誤URLで取りこぼさない）。
+ */
+const PREF_REGION: Record<string, number> = {
+  北海道: 1,
+  青森県: 2, 岩手県: 2, 宮城県: 2, 秋田県: 2, 山形県: 2, 福島県: 2,
+  茨城県: 3, 栃木県: 3, 群馬県: 3, 埼玉県: 3, 千葉県: 3, 東京都: 3, 神奈川県: 3,
+  新潟県: 4, 山梨県: 4, 長野県: 4,
+  富山県: 5, 石川県: 5, 福井県: 5,
+  岐阜県: 6, 静岡県: 6, 愛知県: 6, 三重県: 6,
+  滋賀県: 7, 京都府: 7, 大阪府: 7, 兵庫県: 7, 奈良県: 7, 和歌山県: 7,
+  鳥取県: 8, 島根県: 8, 岡山県: 8, 広島県: 8, 山口県: 8,
+  徳島県: 9, 香川県: 9, 愛媛県: 9, 高知県: 9,
+  福岡県: 10, 佐賀県: 10, 長崎県: 10, 熊本県: 10, 大分県: 10, 宮崎県: 10, 鹿児島県: 10, 沖縄県: 10,
+};
+// JIS順（=都道府県コード順）。配列インデックス+1 が JIS コード。
+const PREF_JIS_ORDER = [
+  '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県',
+  '埼玉県', '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県',
+  '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県',
+  '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県',
+  '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+];
+
+/** 都道府県名 → Walker Plus エリアコード（ar+地方2桁+JIS2桁）。不明なら null。 */
+export function walkerplusArCode(prefecture: string): string | null {
+  const region = PREF_REGION[prefecture];
+  const jis = PREF_JIS_ORDER.indexOf(prefecture) + 1;
+  if (!region || jis <= 0) return null;
+  return `ar${String(region).padStart(2, '0')}${String(jis).padStart(2, '0')}`;
+}
+
+/** Walker Plus の ar コードから、収集に使うリストURL（一般＋花火）を組み立てる。 */
+function walkerplusUrlsForCode(code: string): string[] {
+  return [`https://www.walkerplus.com/event_list/${code}/`, `https://hanabi.walkerplus.com/list/${code}/`];
+}
 
 export interface DiscoverResult {
   total: number;
@@ -15,6 +57,64 @@ export interface DiscoverResult {
 // 1エリアあたりに扱う大手サイト/ブログのページ数。1ページ＝AI抽出1回（Neuron消費）。
 // 無料枠の節約のため控えめにする（じっくり収集は別途ラウンドで追加収集できる）。
 const MAX_PAGES = 6;
+
+// イベントらしいページの手がかり（JSON-LD補完の対象を絞る）。
+const EVENT_HINT = /祭り|まつり|花火|フェス|イベント|開催|ライトアップ|マルシェ|展|ナイト/;
+
+// イベント情報に強い大手サイト（schema.org の Event 構造化データを持つことが多い＝
+// 正確な開催日が取れる）。ウォーカープラス等を直接ねらってイベントを補完する。
+const EVENT_SITE_DOMAINS = [
+  'walkerplus.com', // ウォーカープラス（全国の祭り・花火・イベント）
+  'enjoytokyo.jp', // エンジョイ東京
+  'jorudan.co.jp', // ジョルダン（イベント・花火）
+  'iko-yo.net', // いこーよ（おでかけ・イベント）
+  'omatsurijapan.com', // オマツリジャパン
+];
+
+/** イベント情報サイト（ウォーカープラス等）のホストか。サブドメイン(hanabi.walkerplus.com 等)も含む。 */
+export function isEventSiteHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return EVENT_SITE_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
+}
+
+/** 旅行月に応じた季節イベントのキーワード（別ジャンルのリストを増やして件数を稼ぐ）。 */
+function seasonalEventKeyword(month?: number): string {
+  if (!month || month < 1 || month > 12) return '';
+  if (month >= 3 && month <= 4) return '桜 花見';
+  if (month >= 5 && month <= 6) return '新緑 バラ あじさい';
+  if (month >= 7 && month <= 8) return '夏祭り 花火';
+  if (month === 9) return '秋祭り コスモス';
+  if (month >= 10 && month <= 11) return '紅葉 ライトアップ';
+  return 'イルミネーション 初詣'; // 12〜2月
+}
+
+/**
+ * イベント収集用の検索クエリ。検索（キー無しJina等）は数回で制限がかかるため、
+ * クエリ数は絞り、ウォーカープラスを"最優先"に当てて確実にリストURLを得る。件数は
+ * リストのページ送り(N.html)で稼ぐ方針（検索を増やすより堅牢で速い）。
+ */
+export function buildEventQueries(area: string, month?: number): string[] {
+  const m = month && month >= 1 && month <= 12 ? `${month}月` : '';
+  const season = seasonalEventKeyword(month);
+  const raw = [
+    `${area} イベント walkerplus`, // ← 最優先（event_list を当てる）
+    `${area} 祭り 花火 walkerplus`, // ← hanabi 等の別ジャンルリスト
+    season ? `${area} ${season} walkerplus` : '', // ← 季節もの(koyo等)
+    `${area} イベント 開催 ${m}`, // 保険: 他イベントサイト/一般結果も拾う
+  ];
+  return raw.map((q) => q.replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+
+/**
+ * ページ送りURL。p<=1 はベースURLそのまま、p>=2 は末尾スラッシュURLに N.html を付ける。
+ * クエリ付き/末尾が非スラッシュのURLは段送り不可として null（誤URL生成を避ける）。
+ * 例: event_list/ar0832/ + p2 → event_list/ar0832/2.html
+ */
+export function pageUrlFor(base: string, p: number): string | null {
+  if (p <= 1) return base;
+  const m = base.match(/^(https?:\/\/[^?#]*\/)$/);
+  return m ? `${m[1]}${p}.html` : null;
+}
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -38,6 +138,10 @@ export async function discoverAndScrape(
     onExtractStart?: () => void | Promise<void>;
     /** 検索結果の取得開始位置。再収集時に深い結果を取って新規を増やす。 */
     resultOffset?: number;
+    /** 旅行開始日 YYYY-MM-DD（季節イベントの月をイベント検索に反映）。 */
+    startDate?: string;
+    /** イベントサイトのページ送り取得上限。プランは控えめ・じっくり収集は深く。 */
+    eventPages?: number;
   },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
@@ -53,6 +157,7 @@ export async function discoverAndScrape(
   const offset = Math.max(0, opts.resultOffset ?? 0); // 再収集の深さ
 
   const docs: { source: string; url: string; text: string }[] = [];
+  let jsonldEvents: NormalizedEvent[] = []; // schema.orgのEvent（正確な開催日つき）
   let engine: string | null = null;
   let candidates = 0;
 
@@ -92,18 +197,44 @@ export async function discoverAndScrape(
       const h = hostOf(url);
       if (!h || isExcludedHost(h) || seenHost.has(h)) continue;
       seenHost.add(h);
-      const text = await readPage(http, env, url);
-      if (text.length > 300) docs.push({ source: `web:${h}`, url, text });
+      const page = await readPage(http, env, url);
+      if (page.text.length > 300) docs.push({ source: `web:${h}`, url, text: page.text });
+      // city が空のイベントもこのエリアの収集なので area を既定にして、確実に検索でヒットさせる。
+      for (const ev of page.events) jsonldEvents.push({ ...ev, city: ev.city || area });
     }
   }
 
+  // 3.5) イベント情報サイト（ウォーカープラス等）を直接ねらい、開催日つきイベントを補完。
+  //      schema.org の Event(JSON-LD) を読むだけなので AI(Neuron) を消費しない。best-effort。
+  //      本文収集が空でもイベントだけは拾えるよう、docs有無の判定より前に実行する。
+  try {
+    const month = opts.startDate ? Number(opts.startDate.slice(5, 7)) : undefined;
+    const eventSiteEvents = await collectEventSites(http, env, area, month, opts.eventPages ?? 24);
+    for (const ev of eventSiteEvents) jsonldEvents.push({ ...ev, city: ev.city || area });
+  } catch {
+    /* イベントサイト収集は付加機能。失敗してもプラン作成は続ける */
+  }
+
+  // 終了済み（過去）のイベントは保存しない（2025年など古い催しの混入・DB汚染を防ぐ）。
+  // 開催日不明のスポット/イベントは残す。
+  const today = new Date().toISOString().slice(0, 10);
+  jsonldEvents = jsonldEvents.filter((e) => !isPastEventDate(e, today));
+
   if (!docs.length) {
+    // 本文は取れなくても、イベントサイトから開催日つきイベントが取れていれば保存して返す。
+    let saved = 0;
+    if (jsonldEvents.length) {
+      saved = await upsertEvents(env.DB, 'jsonld', jsonldEvents, new Date().toISOString());
+    }
     return {
       ...empty,
+      total: saved,
       stats: { candidates, fetched: 0, engine },
-      note: candidates
-        ? '検索はできたが、ページ本文を取得できませんでした。'
-        : '検索結果を取得できませんでした（検索サービスに到達できていない可能性）。',
+      note: saved
+        ? `本文は取得できませんでしたが、イベント情報を${saved}件取得しました。`
+        : candidates
+          ? '検索はできたが、ページ本文を取得できませんでした。'
+          : '検索結果を取得できませんでした（検索サービスに到達できていない可能性）。',
     };
   }
 
@@ -132,6 +263,20 @@ export async function discoverAndScrape(
           raw: { from: doc.source, area },
         });
       }
+      // Jina経路は本文（整形済みテキスト）しか得られず、JSON-LD（schema.orgの
+      // 正確な開催日つきEvent）が取れない。イベントらしいページに限り生HTMLを直接
+      // 取得して JSON-LD を補完する（祭り・花火等の開催日を正確に拾うため。件数は
+      // 控えめ・失敗は無視で、速度への影響を最小化）。
+      if (engine === 'jina' && EVENT_HINT.test(doc.text)) {
+        try {
+          const html = await http.getText(doc.url, { skipRobots: true });
+          const scripts = await extractJsonLdScripts(html);
+          // city が空のイベントもこのエリアの収集なので area を既定に（title頼みの検索を避ける）。
+          for (const ev of parseJsonLdEvents(scripts)) events.push({ ...ev, city: ev.city || area });
+        } catch {
+          /* JSON-LD補完の失敗は無視（本文抽出のイベントで代替） */
+        }
+      }
       return { source: doc.source, events };
     } catch {
       return { source: doc.source, events: [] as NormalizedEvent[] };
@@ -142,6 +287,10 @@ export async function discoverAndScrape(
   for (const { source, events } of perDoc) {
     if (events.length) total += await upsertEvents(env.DB, source, events, scrapedAt);
   }
+  // JSON-LD（schema.org）から拾った正確な開催日つきイベントも保存。
+  if (jsonldEvents.length) {
+    total += await upsertEvents(env.DB, 'jsonld', jsonldEvents, scrapedAt);
+  }
 
   return {
     total,
@@ -149,6 +298,282 @@ export async function discoverAndScrape(
     stats: { candidates, fetched: docs.length, engine },
     note: total === 0 ? 'ページは取得できたが、AIがスポットを抽出できませんでした。' : undefined,
   };
+}
+
+/** 都道府県名から接尾辞を外した照合用の名前（島根県→島根 / 東京都→東京 / 北海道→北海道）。 */
+function prefBareName(prefecture: string): string {
+  return prefecture.replace(/[都府県]$/, '');
+}
+
+/**
+ * Walker Plus の全国イベントインデックスHTMLから、指定都道府県の ar コードを探す。
+ * 例: <a href="/event_list/ar0832/">島根</a> → "ar0832"。県名は接尾辞あり/なし両対応。
+ * 純粋関数（テスト可能）。検索(Jina)に頼らずコードを得る要。
+ */
+export function findWalkerplusArCode(html: string, prefecture: string): string | null {
+  const bare = prefBareName(prefecture);
+  if (!bare) return null;
+  const re = /\/event_list\/(ar\d{3,4})\/"[^>]*>\s*([^<]{1,24})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const code = m[1];
+    const label = m[2].trim();
+    if (label && (label.includes(bare) || bare.includes(label))) return code;
+  }
+  return null;
+}
+
+/**
+ * 都道府県名から Walker Plus のリストURLを「組み立てて、実在確認してから」返す。
+ * ar+地方+JIS のコードで event_list ページを引き、実際にイベントが取れた時だけ採用する。
+ * 地方番号の推定が外れた県は空を返し、上位で index/検索 にフォールバックする（誤URL回避）。
+ * 検索(Jina)非依存なので枯渇していても全県で機能しうる。
+ */
+async function constructWalkerplusUrls(http: HttpClient, env: Env, prefecture: string): Promise<string[]> {
+  const code = walkerplusArCode(prefecture);
+  if (!code) return [];
+  const listUrl = `https://www.walkerplus.com/event_list/${code}/`;
+  const { html } = await fetchEventHtml(http, env, listUrl);
+  if (!html) return [];
+  try {
+    const events = parseJsonLdEvents(await extractJsonLdScripts(html));
+    if (events.length) return walkerplusUrlsForCode(code);
+  } catch {
+    /* 解析失敗＝このコードは無効 */
+  }
+  return [];
+}
+
+/**
+ * 生HTMLを取得する（JSON-LDの有無を問わない）。Walker Plusのインデックス等、ナビだけの
+ * ページ用。直接取得を最優先（walkerplusはサーバー直取得が通る）。空/失敗時のみ Jina(html)。
+ * ※ fetchEventHtml は ld+json を含むページだけを「直接成功」とみなすため、ld+jsonを持たない
+ *   インデックスでは使えない（Jina枯渇に巻き込まれる）。ここは専用の素直な直接取得にする。
+ */
+async function fetchPlainHtml(http: HttpClient, env: Env, url: string): Promise<string> {
+  try {
+    const html = await http.getText(url, { skipRobots: true });
+    if (html) return html;
+  } catch {
+    /* 直接取得失敗 → Jina へ */
+  }
+  try {
+    const headers: Record<string, string> = { 'X-Return-Format': 'html' };
+    if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
+    return (await http.getText(`https://r.jina.ai/${url}`, { skipRobots: true, headers })) || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Walker Plus 全国インデックスを「生HTMLで」直接取得し、その県の ar コードからリストURLを得る。
+ * インデックスは JSON-LD を持たないので fetchPlainHtml で取る（＝Jina非依存・枯渇に巻き込まれない）。
+ */
+async function discoverWalkerplusFromIndex(http: HttpClient, env: Env, prefecture: string): Promise<string[]> {
+  const html = await fetchPlainHtml(http, env, 'https://www.walkerplus.com/event_list/');
+  if (!html) return [];
+  const code = findWalkerplusArCode(html, prefecture);
+  return code ? walkerplusUrlsForCode(code) : [];
+}
+
+/**
+ * イベントサイトのリストURLを決める（Jina非依存を最優先）。
+ * 1) DBキャッシュ → 2) ar コードを組み立てて実在確認 → 3) 全国インデックスから発見
+ * → 4) 検索（Jina等・最後の手段）。1〜3 は検索不要でレート制限に強い。確定したら県毎にキャッシュ。
+ */
+async function resolveEventSiteUrls(
+  http: HttpClient,
+  env: Env,
+  area: string,
+  month?: number,
+): Promise<{ urls: string[]; prefecture?: string; source: 'cache' | 'arcode' | 'index' | 'search' }> {
+  const pref = prefectureOf(area);
+  if (pref) {
+    const cached = await getEventSourceUrls(env.DB, pref).catch(() => [] as string[]);
+    if (cached.length) return { urls: cached, prefecture: pref, source: 'cache' };
+
+    const built = await constructWalkerplusUrls(http, env, pref).catch(() => [] as string[]);
+    if (built.length) {
+      await putEventSourceUrls(env.DB, pref, built).catch(() => {});
+      return { urls: built, prefecture: pref, source: 'arcode' };
+    }
+
+    const idx = await discoverWalkerplusFromIndex(http, env, pref).catch(() => [] as string[]);
+    if (idx.length) {
+      await putEventSourceUrls(env.DB, pref, idx).catch(() => {});
+      return { urls: idx, prefecture: pref, source: 'index' };
+    }
+  }
+  const found = await searchEventSiteUrls(http, env, area, month);
+  if (found.length && pref) await putEventSourceUrls(env.DB, pref, found).catch(() => {});
+  return { urls: found, prefecture: pref, source: 'search' };
+}
+
+/** イベントサイトのURLを検索で集める（ウォーカープラス等のホストだけ残す）。 */
+async function searchEventSiteUrls(http: HttpClient, env: Env, area: string, month?: number): Promise<string[]> {
+  const queries = buildEventQueries(area, month);
+  const urls: string[] = [];
+  for (const q of queries) {
+    if (urls.length >= 16) break;
+    let found: string[] = [];
+    try {
+      found = (await jinaSearch(http, env, q)).map((r) => r.url);
+    } catch {
+      /* jina 不調 */
+    }
+    if (!found.length) {
+      try {
+        found = (await searchWeb(http, env, q)).urls;
+      } catch {
+        found = [];
+      }
+    }
+    for (const u of found) {
+      const h = hostOf(u);
+      if (h && isEventSiteHost(h) && !urls.includes(u)) urls.push(u);
+    }
+  }
+  return urls;
+}
+
+/**
+ * イベントページの生HTML（JSON-LD入り）を取得する。
+ * 1) 直接取得（速い・JSON-LDそのまま）。2) ボットブロックで弾かれたら Jina Reader を
+ * html返却モード（X-Return-Format: html）で。サーバーIP＋bot回避でld+jsonを保持できる。
+ * 返り値の via で、どの経路で取れたか（または失敗か）が分かる。
+ */
+async function fetchEventHtml(
+  http: HttpClient,
+  env: Env,
+  url: string,
+): Promise<{ html: string; via: 'direct' | 'jina' | 'fail' }> {
+  try {
+    const html = await http.getText(url, { skipRobots: true });
+    if (html && html.includes('application/ld+json')) return { html, via: 'direct' };
+  } catch {
+    /* 直接取得が弾かれた → Jina へ */
+  }
+  try {
+    const headers: Record<string, string> = { 'X-Return-Format': 'html' };
+    if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
+    const html = await http.getText(`https://r.jina.ai/${url}`, { skipRobots: true, headers });
+    if (html) return { html, via: 'jina' };
+  } catch {
+    /* Jina も失敗 */
+  }
+  return { html: '', via: 'fail' };
+}
+
+interface EventPageLog {
+  url: string;
+  via: 'direct' | 'jina' | 'fail';
+  jsonldBlocks: number;
+  newEvents: number;
+}
+
+/**
+ * 各リストURLを「新規イベントが出る限り」ページ送りで深掘りする適応型収集。
+ * あるページが新規0件（尽きた/重複/失敗）になったら、そのリストは打ち切って次のリストへ。
+ * これで生きているリスト(www event_list等)を深く掘り、死にページ(hanabiの2頁目以降等)に
+ * 取得枠を浪費しない。schema.orgのEventを読むだけでAI(Neuron)は消費しない。
+ */
+async function gatherEventSiteEvents(
+  http: HttpClient,
+  env: Env,
+  baseUrls: string[],
+  maxPages: number,
+  perBaseMax = 25,
+): Promise<{ events: NormalizedEvent[]; pages: EventPageLog[] }> {
+  const seen = new Set<string>();
+  const events: NormalizedEvent[] = [];
+  const pages: EventPageLog[] = [];
+  let fetched = 0;
+  for (const base of baseUrls) {
+    for (let p = 1; p <= perBaseMax && fetched < maxPages; p++) {
+      const url = pageUrlFor(base, p);
+      if (!url) break;
+      const { html, via } = await fetchEventHtml(http, env, url);
+      fetched++;
+      let jsonldBlocks = 0;
+      let parsed: NormalizedEvent[] = [];
+      if (html) {
+        try {
+          const scripts = await extractJsonLdScripts(html);
+          jsonldBlocks = scripts.length;
+          parsed = parseJsonLdEvents(scripts);
+        } catch {
+          /* 解析失敗 */
+        }
+      }
+      let newCount = 0;
+      for (const ev of parsed) {
+        const key = ev.sourceEventId || ev.url || ev.title;
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        events.push(ev);
+        newCount++;
+      }
+      pages.push({ url, via, jsonldBlocks, newEvents: newCount });
+      if (newCount === 0) break; // このリストは尽きた → 次のリストへ
+    }
+  }
+  return { events, pages };
+}
+
+/**
+ * イベント情報サイト（ウォーカープラス等）からイベントを収集する。
+ * リストURL（内蔵/キャッシュ/検索で解決）を適応型ページ送りで深掘りする。
+ */
+async function collectEventSites(
+  http: HttpClient,
+  env: Env,
+  area: string,
+  month?: number,
+  maxPages = 24,
+): Promise<NormalizedEvent[]> {
+  const { urls } = await resolveEventSiteUrls(http, env, area, month);
+  const { events } = await gatherEventSiteEvents(http, env, urls, maxPages);
+  return events;
+}
+
+/**
+ * 診断用: イベントサイト収集の各段階を可視化する（/api/diag/events）。
+ * どのリストURLを使い、何ページ取得し、重複除去/過去除外後に何件になるかを返す。
+ * 「本当にウォーカープラス等から十分な件数が取れているか」を本番で実証するため。
+ */
+export async function diagCollectEventSites(env: Env, area: string, month?: number, maxPages = 24) {
+  const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 600 });
+  const queries = buildEventQueries(area, month);
+  const { urls: base, prefecture, source } = await resolveEventSiteUrls(http, env, area, month);
+  const { events: distinct, pages } = await gatherEventSiteEvents(http, env, base, maxPages);
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = distinct.filter((e) => !isPastEventDate(e, today));
+  return {
+    area,
+    prefecture,
+    source, // cache(DB) / arcode(コード組立) / index(全国索引) / search(検索)。Jina非依存かが分かる。
+    hasJinaKey: !!env.JINA_API_KEY, // アプリ(Worker)がJinaキーを認識しているか
+    month,
+    queries,
+    eventSiteUrls: base,
+    fetchedPages: pages.length,
+    distinctEvents: distinct.length,
+    upcomingEvents: upcoming.length, // 実際に保存される件数（過去除外後）
+    perPage: pages, // url/via/jsonldBlocks/newEvents
+    sample: upcoming.slice(0, 20).map((e) => ({ title: e.title, startAt: e.startAt, endAt: e.endAt, url: e.url })),
+  };
+}
+
+/**
+ * 終了日（無ければ開催日）が「今日」より前なら過去イベントと判定する。
+ * 開催日が分からないもの（通常の観光スポット等）は過去扱いしない（false）。
+ * todayStr は "YYYY-MM-DD"。日付文字列の先頭10桁を辞書順比較するのでタイムゾーン非依存。
+ */
+export function isPastEventDate(ev: { startAt?: string; endAt?: string }, todayStr: string): boolean {
+  const d = (ev.endAt || ev.startAt || '').slice(0, 10);
+  if (!d) return false;
+  return d < todayStr;
 }
 
 /** "YYYY-MM-DD" 形式のみを ISO 日時に変換。妥当な年でなければ undefined（創作日付の混入防止）。 */
@@ -205,22 +630,59 @@ async function jinaSearch(
   }
 }
 
-/** ページ本文取得: Jina Reader(r.jina.ai)優先（botブロック回避）→ 直接取得。 */
-async function readPage(http: HttpClient, env: Env, url: string): Promise<string> {
-  try {
+/**
+ * ページ本文取得＋JSON-LDイベント抽出。
+ * - JINA_API_KEYがあれば Jina Reader 優先（botブロック回避）。
+ * - 無ければ「直接取得」を優先（無料Jinaは枠切れしやすいため）。
+ * 直接取得できたときは HTML から schema.org の Event/観光スポット（正確な開催日つき）も拾う。
+ */
+async function readPage(http: HttpClient, env: Env, url: string): Promise<{ text: string; events: NormalizedEvent[] }> {
+  const hasKey = !!env.JINA_API_KEY;
+  const tryJina = async (): Promise<string> => {
     const headers: Record<string, string> = {};
     if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
     const md = await http.getText(`https://r.jina.ai/${url}`, { skipRobots: true, headers });
-    if (md && md.length > 300) return md;
+    return md && md.length > 300 ? md : '';
+  };
+  const tryDirect = async (): Promise<{ text: string; events: NormalizedEvent[] }> => {
+    const html = await http.getText(url, { skipRobots: true });
+    let events: NormalizedEvent[] = [];
+    try {
+      const scripts = await extractJsonLdScripts(html);
+      if (scripts.length) events = parseJsonLdEvents(scripts);
+    } catch {
+      /* JSON-LD抽出失敗は無視 */
+    }
+    return { text: extractReadableText(html), events };
+  };
+
+  if (hasKey) {
+    try {
+      const md = await tryJina();
+      if (md) return { text: md, events: [] };
+    } catch {
+      /* 直接へ */
+    }
+    try {
+      return await tryDirect();
+    } catch {
+      return { text: '', events: [] };
+    }
+  }
+  // キー無し: 直接取得を優先（Jina枠切れ対策）→ ダメなら Jina Reader
+  try {
+    const d = await tryDirect();
+    if (d.text.length > 300 || d.events.length) return d;
   } catch {
-    /* 直接取得にフォールバック */
+    /* Jinaへ */
   }
   try {
-    const html = await http.getText(url, { skipRobots: true });
-    return extractReadableText(html);
+    const md = await tryJina();
+    if (md) return { text: md, events: [] };
   } catch {
-    return '';
+    /* 諦め */
   }
+  return { text: '', events: [] };
 }
 
 /** Brave API（キーがあれば）→ Bing → DuckDuckGo の順でURL候補を得る。 */

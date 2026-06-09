@@ -174,6 +174,20 @@ select {
   background: #fcfdff;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
+/* iOS Safari は input[type=date] の値が右寄せ＆中央寄りになるため、左寄せに揃える。 */
+input[type='date'] {
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: left;
+}
+input[type='date']::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+input[type='date']::-webkit-datetime-edit {
+  text-align: left;
+  padding: 0;
+}
 input::placeholder {
   color: var(--muted);
 }
@@ -187,8 +201,8 @@ select:focus {
 
 /* interest chips */
 .chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 9px;
 }
 .chip {
@@ -196,12 +210,14 @@ select:focus {
   border: 1.5px solid var(--line);
   background: #fff;
   border-radius: 999px;
-  padding: 9px 16px;
+  padding: 9px 10px;
   cursor: pointer;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--ink-soft);
   user-select: none;
+  text-align: center;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 .chip:hover {
@@ -237,6 +253,9 @@ select:focus {
   height: 18px;
   accent-color: var(--brand);
   cursor: pointer;
+}
+.daytrip-switch {
+  margin: 0 0 12px;
 }
 
 .checks {
@@ -1913,6 +1932,7 @@ footer {
   line-height: 1.6;
 }
 .suggest-results {
+  margin-top: 14px;
   margin-bottom: 16px;
 }
 .suggest-h {
@@ -1960,6 +1980,37 @@ footer {
 }
 .suggest-pick {
   margin-top: 10px;
+}
+.suggest-again {
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* ---------- 持ち物リスト ---------- */
+.packing-box {
+  margin-bottom: 16px;
+}
+.pack-group {
+  margin-bottom: 8px;
+}
+.pack-title {
+  font-weight: 700;
+  color: var(--brand-ink);
+  margin: 8px 0 4px;
+  font-size: 0.92rem;
+}
+.pack-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.pack-item input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
 }
 
 /* ---------- 地名オートコンプリート ---------- */

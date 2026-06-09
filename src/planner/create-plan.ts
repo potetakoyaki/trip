@@ -65,6 +65,8 @@ export async function createPlan(
           area: body.area,
           interests: body.interests,
           keyword: body.keyword,
+          startDate: body.startDate,
+          eventPages: 14, // プランは応答性優先で控えめ（深掘りは「じっくり収集」が担う）
           onExtractStart: () => report('スポット情報を抽出中…', 50),
         });
       } catch {
@@ -83,36 +85,49 @@ export async function createPlan(
     }
   }
 
-  await report('情報を整理して宿泊先を検索中…', 68);
+  // 日帰り（開始日＝終了日・0泊）は宿泊先が不要なので検索しない。
+  const isDayTrip = !!body.startDate && body.startDate === body.endDate;
+
+  await report(isDayTrip ? '情報を整理しています…' : '情報を整理して宿泊先を検索中…', 68);
   // エリアの中心座標と都道府県を1回求め、ホテルの地域絞り込み・地図の誤ピン防止に使う。
   const areaCenter = body.area ? await geocodeQuery(env, body.area) : null;
   const areaPref = areaCenter ? await reversePrefecture(env, areaCenter.lat, areaCenter.lng) : undefined;
 
   let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
-  try {
-    realHotels = await fetchRakutenHotels(env, body.area, origin, {
-      keywords: body.hotelFeatures,
-      maxPrice: body.budget,
-      limit: 24,
-      checkinDate: body.startDate,
-      checkoutDate: body.endDate,
-      prefecture: areaPref,
-      adults: body.adults,
-    });
-  } catch {
-    realHotels = [];
+  if (!isDayTrip) {
+    try {
+      realHotels = await fetchRakutenHotels(env, body.area, origin, {
+        keywords: body.hotelFeatures,
+        maxPrice: body.budget,
+        limit: 24,
+        checkinDate: body.startDate,
+        checkoutDate: body.endDate,
+        prefecture: areaPref,
+        adults: body.adults,
+      });
+    } catch {
+      realHotels = [];
+    }
   }
 
   await report('AIがプランを組み立て中…', 82);
-  const plan = await generatePlan(env, events, body, { hotels: realHotels });
+  let plan = await generatePlan(env, events, body, { hotels: realHotels });
 
-  // スポットが1件も組み込めなかった場合は、情報取得に失敗している可能性が高い。
-  // 空のプランを「成功」として返さず、明確なエラーにする。
-  const itemCount = plan.days.reduce((n, d) => n + d.items.length, 0);
-  if (itemCount === 0) {
-    throw new Error(
-      'スポット情報を取得できませんでした（情報元のAPIエラー、またはこのエリアの情報が少ない可能性があります）。エリア名をもう少し具体的にするか、時間をおいて再度お試しください。',
-    );
+  // スポットが1件も無いとき（AIが一時停止＆収集も空など）は、収集データに依存せず
+  // AIの一般知識だけでもう一度組み立て直す。これでも空なら、赤いエラーで全滅させず
+  // 注記つきで返す（ユーザー要望: このエラーは出さない／ちゃんと作る）。
+  const countItems = (p: Plan) => p.days.reduce((n, d) => n + d.items.length, 0);
+  if (countItems(plan) === 0) {
+    try {
+      const retry = await generatePlan(env, [], { ...body, engine: undefined }, { hotels: realHotels });
+      if (countItems(retry) > 0) plan = retry;
+    } catch {
+      /* 再生成の失敗は無視して下の注記へ */
+    }
+  }
+  if (countItems(plan) === 0 && !plan.notice) {
+    plan.notice =
+      'このエリアの詳しい情報を十分に集められませんでした。エリア名をもう少し具体的にすると精度が上がります（例: 「島根」→「出雲市」）。少し時間をおいて再作成すると改善することがあります。';
   }
 
   // 地図用に各スポットの実座標を取得（AIの推測座標を上書き。エリア近傍のみ採用）。

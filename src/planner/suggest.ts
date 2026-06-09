@@ -24,6 +24,8 @@ export interface SuggestOpts {
   maxHours?: number;
   /** 旅行開始日 YYYY-MM-DD（時期・季節のイベント/旬を考慮するため）。 */
   startDate?: string;
+  /** 既に提案済みで、今回は避けたい行き先（「再考」で別案を出すため）。 */
+  exclude?: string[];
 }
 
 const SEASON = ['冬', '冬', '春', '春', '春', '初夏', '夏', '夏', '初秋', '秋', '秋', '冬'];
@@ -50,6 +52,10 @@ export async function suggestAreas(env: Env, opts: SuggestOpts): Promise<AreaSug
   if (opts.vibe) cond.push(`志向: ${opts.vibe}`);
   if (opts.interests?.length) cond.push(`興味: ${opts.interests.join('、')}`);
   if (opts.keyword) cond.push(`やりたいこと: ${opts.keyword}`);
+  const excluded = (opts.exclude || []).map((s) => String(s).trim()).filter(Boolean).slice(0, 12);
+  if (excluded.length) {
+    cond.push(`既出につき除外（別の行き先・別エリアにする）: ${excluded.join('、')}`);
+  }
 
   const sys =
     'あなたは旅のプロのコンシェルジュです。誰でも思いつく教科書的な提案を嫌い、各案に明確な「独自の切り口」を持たせます。JSONのみ出力。';
@@ -65,9 +71,11 @@ export async function suggestAreas(env: Env, opts: SuggestOpts): Promise<AreaSug
   ].join('\n');
 
   let text = '';
+  // 「再考」（除外あり）のときは温度を上げて、前回と毛色の違う案が出やすくする。
+  const temperature = excluded.length ? 1.0 : 0.7;
   if (geminiEnabled(env)) {
     try {
-      text = await geminiGenerate(env, sys, user, { maxOutputTokens: 1200 });
+      text = await geminiGenerate(env, sys, user, { maxOutputTokens: 1200, temperature });
     } catch {
       /* Workers AI へ */
     }

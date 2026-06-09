@@ -145,6 +145,24 @@ const CITIES: Place[] = [
 
 export const PLACES: Place[] = [...PREFS, ...CITIES];
 
+/**
+ * エリア入力（"出雲市" / "島根県松江市" / "島根" 等）から都道府県名を解決する。
+ * 1) 都道府県名を含む 2) 市区町村名からの逆引き 3) 県名の前方一致。当たらなければ undefined。
+ */
+export function prefectureOf(area: string): string | undefined {
+  const q = (area || '').trim();
+  if (!q) return undefined;
+  const pref = PREFS.find((p) => q.includes(p.name));
+  if (pref) return pref.name;
+  const city = CITIES.find((c) => q.includes(c.name) || c.name.includes(q));
+  if (city) return city.pref;
+  if (q.length >= 2) {
+    const pre = PREFS.find((p) => p.name.startsWith(q) || p.kana.startsWith(q));
+    if (pre) return pre.name;
+  }
+  return undefined;
+}
+
 /** カタカナ→ひらがな（kana照合用。カタカナ入力でもヒットさせる）。 */
 function kataToHira(s: string): string {
   return s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));

@@ -150,11 +150,33 @@ export async function getJob(db: D1Database, area: string): Promise<CollectJob |
   return r ?? null;
 }
 
+const ROUND_STALE_MS = 120000; // この時間 running のまま更新が無ければ「落ちた」とみなし再取得可。
+
 export async function takeNextPendingJob(db: D1Database): Promise<CollectJob | null> {
+  // 保留中に加え、running のまま停止した（落ちた）ジョブも再取得対象にする。
+  const staleBefore = new Date(Date.now() - ROUND_STALE_MS).toISOString();
   const r = await db
-    .prepare("SELECT * FROM collect_jobs WHERE status = 'pending' ORDER BY updated_at ASC LIMIT 1")
+    .prepare(
+      "SELECT * FROM collect_jobs WHERE status='pending' OR (status='running' AND updated_at < ?) ORDER BY updated_at ASC LIMIT 1",
+    )
+    .bind(staleBefore)
     .first<CollectJob>();
   return r ?? null;
+}
+
+/**
+ * 1ラウンド処理の排他取得。pending か「落ちた running」を running に切り替え、
+ * 1件でも更新できた呼び出しだけ true（勝者）。waitUntil と Cron の二重実行を防ぐ。
+ */
+export async function claimJobRound(db: D1Database, area: string, now: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - ROUND_STALE_MS).toISOString();
+  const res = await db
+    .prepare(
+      "UPDATE collect_jobs SET status='running', updated_at=? WHERE area=? AND (status='pending' OR (status='running' AND updated_at < ?))",
+    )
+    .bind(now, area, staleBefore)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
 export async function updateJobProgress(
@@ -168,10 +190,12 @@ export async function updateJobProgress(
     .run();
 }
 
-/** じっくり収集をキャンセル（保留中のみ）。以降のラウンドは実行されない。 */
+/** じっくり収集をキャンセル（保留中・実行中）。以降のラウンドは実行されない。 */
 export async function cancelCollectJob(db: D1Database, area: string, now: string): Promise<boolean> {
   const res = await db
-    .prepare("UPDATE collect_jobs SET status='cancelled', updated_at=? WHERE area=? AND status='pending'")
+    .prepare(
+      "UPDATE collect_jobs SET status='cancelled', updated_at=? WHERE area=? AND (status='pending' OR status='running')",
+    )
     .bind(now, area)
     .run();
   return (res.meta?.changes ?? 0) > 0;
@@ -458,6 +482,45 @@ export async function ensureEventsColumns(db: D1Database): Promise<void> {
 }
 
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */
+/**
+ * イベント情報サイト（ウォーカープラス等）の発見済みリストURLを都道府県ごとにキャッシュする。
+ * 一度発見すれば次回は検索（Jina等）不要で直接取得でき、レート制限に強くなる。
+ */
+export async function ensureEventSourceCache(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS event_source_cache (
+        pref TEXT PRIMARY KEY, urls TEXT NOT NULL, updated_at TEXT NOT NULL
+      )`,
+    )
+    .run();
+}
+
+export async function getEventSourceUrls(db: D1Database, pref: string): Promise<string[]> {
+  if (!pref) return [];
+  await ensureEventSourceCache(db);
+  const row = await db.prepare('SELECT urls FROM event_source_cache WHERE pref = ?').bind(pref).first<{ urls: string }>();
+  if (!row?.urls) return [];
+  try {
+    const arr = JSON.parse(row.urls);
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function putEventSourceUrls(db: D1Database, pref: string, urls: string[]): Promise<void> {
+  if (!pref || !urls.length) return;
+  await ensureEventSourceCache(db);
+  await db
+    .prepare(
+      `INSERT INTO event_source_cache (pref, urls, updated_at) VALUES (?,?,?)
+       ON CONFLICT(pref) DO UPDATE SET urls = excluded.urls, updated_at = excluded.updated_at`,
+    )
+    .bind(pref, JSON.stringify(urls.slice(0, 12)), new Date().toISOString())
+    .run();
+}
+
 export async function upsertEvents(
   db: D1Database,
   source: string,
@@ -534,12 +597,16 @@ export async function searchEvents(db: D1Database, query: EventQuery): Promise<E
     where.push('(title LIKE ? OR description LIKE ?)');
     binds.push(`%${query.q}%`, `%${query.q}%`);
   }
-  // 日付フィルタ: 日付不明(start_at IS NULL)は常に候補に残す
-  if (query.from) {
-    where.push('(start_at IS NULL OR start_at >= ?)');
+  // 日付フィルタ: 開催期間[start_at, end_at]が旅行期間[from, to]と「重なる」ものを残す。
+  // 終了日が無い催しは単日(end_at=start_at)とみなす。日付不明(start_at IS NULL)は常に残す。
+  // これで長期開催(会期が旅行日をまたぐ展覧会・ビアガーデン等)を取りこぼさない。
+  if (query.from && query.to) {
+    where.push('(start_at IS NULL OR (start_at <= ? AND COALESCE(end_at, start_at) >= ?))');
+    binds.push(`${query.to}T23:59:59`, `${query.from}T00:00:00`);
+  } else if (query.from) {
+    where.push('(start_at IS NULL OR COALESCE(end_at, start_at) >= ?)');
     binds.push(`${query.from}T00:00:00`);
-  }
-  if (query.to) {
+  } else if (query.to) {
     where.push('(start_at IS NULL OR start_at <= ?)');
     binds.push(`${query.to}T23:59:59`);
   }
