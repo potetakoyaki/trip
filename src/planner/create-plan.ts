@@ -65,6 +65,7 @@ export async function createPlan(
           area: body.area,
           interests: body.interests,
           keyword: body.keyword,
+          startDate: body.startDate,
           onExtractStart: () => report('スポット情報を抽出中…', 50),
         });
       } catch {

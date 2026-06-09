@@ -20,6 +20,32 @@ const MAX_PAGES = 6;
 // イベントらしいページの手がかり（JSON-LD補完の対象を絞る）。
 const EVENT_HINT = /祭り|まつり|花火|フェス|イベント|開催|ライトアップ|マルシェ|展|ナイト/;
 
+// イベント情報に強い大手サイト（schema.org の Event 構造化データを持つことが多い＝
+// 正確な開催日が取れる）。ウォーカープラス等を直接ねらってイベントを補完する。
+const EVENT_SITE_DOMAINS = [
+  'walkerplus.com', // ウォーカープラス（全国の祭り・花火・イベント）
+  'enjoytokyo.jp', // エンジョイ東京
+  'jorudan.co.jp', // ジョルダン（イベント・花火）
+  'iko-yo.net', // いこーよ（おでかけ・イベント）
+  'omatsurijapan.com', // オマツリジャパン
+];
+
+/** イベント情報サイト（ウォーカープラス等）のホストか。サブドメイン(hanabi.walkerplus.com 等)も含む。 */
+export function isEventSiteHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return EVENT_SITE_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
+}
+
+/** イベント収集用の検索クエリ。ウォーカープラスを明示的に狙い、旅行月の季節イベントも拾う。 */
+export function buildEventQueries(area: string, month?: number): string[] {
+  const m = month && month >= 1 && month <= 12 ? `${month}月` : '';
+  return [
+    `${area} イベント 祭り 開催 ${m}`.replace(/\s+/g, ' ').trim(),
+    `${area} 花火大会 ${m}`.replace(/\s+/g, ' ').trim(),
+    `${area} イベント walkerplus`,
+  ];
+}
+
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -42,6 +68,8 @@ export async function discoverAndScrape(
     onExtractStart?: () => void | Promise<void>;
     /** 検索結果の取得開始位置。再収集時に深い結果を取って新規を増やす。 */
     resultOffset?: number;
+    /** 旅行開始日 YYYY-MM-DD（季節イベントの月をイベント検索に反映）。 */
+    startDate?: string;
   },
 ): Promise<DiscoverResult> {
   const area = opts.area.trim();
@@ -104,13 +132,32 @@ export async function discoverAndScrape(
     }
   }
 
+  // 3.5) イベント情報サイト（ウォーカープラス等）を直接ねらい、開催日つきイベントを補完。
+  //      schema.org の Event(JSON-LD) を読むだけなので AI(Neuron) を消費しない。best-effort。
+  //      本文収集が空でもイベントだけは拾えるよう、docs有無の判定より前に実行する。
+  try {
+    const month = opts.startDate ? Number(opts.startDate.slice(5, 7)) : undefined;
+    const eventSiteEvents = await collectEventSites(http, env, area, month);
+    for (const ev of eventSiteEvents) jsonldEvents.push({ ...ev, city: ev.city || area });
+  } catch {
+    /* イベントサイト収集は付加機能。失敗してもプラン作成は続ける */
+  }
+
   if (!docs.length) {
+    // 本文は取れなくても、イベントサイトから開催日つきイベントが取れていれば保存して返す。
+    let saved = 0;
+    if (jsonldEvents.length) {
+      saved = await upsertEvents(env.DB, 'jsonld', jsonldEvents, new Date().toISOString());
+    }
     return {
       ...empty,
+      total: saved,
       stats: { candidates, fetched: 0, engine },
-      note: candidates
-        ? '検索はできたが、ページ本文を取得できませんでした。'
-        : '検索結果を取得できませんでした（検索サービスに到達できていない可能性）。',
+      note: saved
+        ? `本文は取得できませんでしたが、イベント情報を${saved}件取得しました。`
+        : candidates
+          ? '検索はできたが、ページ本文を取得できませんでした。'
+          : '検索結果を取得できませんでした（検索サービスに到達できていない可能性）。',
     };
   }
 
@@ -174,6 +221,56 @@ export async function discoverAndScrape(
     stats: { candidates, fetched: docs.length, engine },
     note: total === 0 ? 'ページは取得できたが、AIがスポットを抽出できませんでした。' : undefined,
   };
+}
+
+/**
+ * イベント情報サイト（ウォーカープラス等）を検索でねらい、各ページの JSON-LD から
+ * 開催日つきイベントを取り出す。AI抽出は行わない（schema.orgのEventを読むだけ＝無料）。
+ * 件数・取得ページ数は控えめにして速度と相手サーバーへの負荷を抑える。
+ */
+async function collectEventSites(
+  http: HttpClient,
+  env: Env,
+  area: string,
+  month?: number,
+): Promise<NormalizedEvent[]> {
+  const queries = buildEventQueries(area, month);
+  const urls: string[] = [];
+  for (const q of queries) {
+    if (urls.length >= 6) break;
+    // jina 検索（あれば）→ 無ければ通常検索。イベントサイトのURLだけを拾う。
+    let found: string[] = [];
+    try {
+      const jina = await jinaSearch(http, env, q);
+      found = jina.map((r) => r.url);
+    } catch {
+      /* jina 不調 */
+    }
+    if (!found.length) {
+      try {
+        found = (await searchWeb(http, env, q)).urls;
+      } catch {
+        found = [];
+      }
+    }
+    for (const u of found) {
+      const h = hostOf(u);
+      if (h && isEventSiteHost(h) && !urls.includes(u)) urls.push(u);
+    }
+  }
+
+  const events: NormalizedEvent[] = [];
+  // 取得は最大4ページまで。各ページの JSON-LD(Event) を読む。
+  for (const url of urls.slice(0, 4)) {
+    try {
+      const html = await http.getText(url, { skipRobots: true });
+      const scripts = await extractJsonLdScripts(html);
+      for (const ev of parseJsonLdEvents(scripts)) events.push(ev);
+    } catch {
+      /* 1ページの失敗は無視 */
+    }
+  }
+  return events;
 }
 
 /** "YYYY-MM-DD" 形式のみを ISO 日時に変換。妥当な年でなければ undefined（創作日付の混入防止）。 */
