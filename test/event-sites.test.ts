@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isEventSiteHost, buildEventQueries } from '../src/scrape/autosource';
+import { isEventSiteHost, buildEventQueries, isPastEventDate } from '../src/scrape/autosource';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 
 describe('isEventSiteHost: イベント情報サイトの判定', () => {
@@ -31,6 +31,22 @@ describe('buildEventQueries: イベント検索クエリ', () => {
   it('月なし/範囲外は月を付けない', () => {
     expect(buildEventQueries('金沢市')).toContain('金沢市 イベント 祭り 開催');
     expect(buildEventQueries('金沢市', 13)).toContain('金沢市 花火大会');
+  });
+});
+
+describe('isPastEventDate: 過去イベントの判定', () => {
+  const today = '2026-06-09';
+  it('終了日が今日より前なら過去', () => {
+    expect(isPastEventDate({ startAt: '2025-08-09T00:00:00.000Z', endAt: '2025-08-09T00:00:00.000Z' }, today)).toBe(true);
+  });
+  it('終了日が今日以降なら過去でない', () => {
+    expect(isPastEventDate({ startAt: '2026-08-01T00:00:00.000Z', endAt: '2026-08-02T00:00:00.000Z' }, today)).toBe(false);
+  });
+  it('開催中（開始は過去・終了は未来）は残す', () => {
+    expect(isPastEventDate({ startAt: '2026-05-23T00:00:00.000Z', endAt: '2026-09-26T00:00:00.000Z' }, today)).toBe(false);
+  });
+  it('日付不明は過去扱いしない', () => {
+    expect(isPastEventDate({}, today)).toBe(false);
   });
 });
 

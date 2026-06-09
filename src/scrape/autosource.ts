@@ -85,7 +85,7 @@ export async function discoverAndScrape(
   const offset = Math.max(0, opts.resultOffset ?? 0); // 再収集の深さ
 
   const docs: { source: string; url: string; text: string }[] = [];
-  const jsonldEvents: NormalizedEvent[] = []; // schema.orgのEvent（正確な開催日つき）
+  let jsonldEvents: NormalizedEvent[] = []; // schema.orgのEvent（正確な開催日つき）
   let engine: string | null = null;
   let candidates = 0;
 
@@ -142,6 +142,11 @@ export async function discoverAndScrape(
   } catch {
     /* イベントサイト収集は付加機能。失敗してもプラン作成は続ける */
   }
+
+  // 終了済み（過去）のイベントは保存しない（2025年など古い催しの混入・DB汚染を防ぐ）。
+  // 開催日不明のスポット/イベントは残す。
+  const today = new Date().toISOString().slice(0, 10);
+  jsonldEvents = jsonldEvents.filter((e) => !isPastEventDate(e, today));
 
   if (!docs.length) {
     // 本文は取れなくても、イベントサイトから開催日つきイベントが取れていれば保存して返す。
@@ -345,6 +350,17 @@ export async function diagCollectEventSites(env: Env, area: string, month?: numb
     });
   }
   return { area, month, queries, eventSiteUrls: urls, pages, totalEvents };
+}
+
+/**
+ * 終了日（無ければ開催日）が「今日」より前なら過去イベントと判定する。
+ * 開催日が分からないもの（通常の観光スポット等）は過去扱いしない（false）。
+ * todayStr は "YYYY-MM-DD"。日付文字列の先頭10桁を辞書順比較するのでタイムゾーン非依存。
+ */
+export function isPastEventDate(ev: { startAt?: string; endAt?: string }, todayStr: string): boolean {
+  const d = (ev.endAt || ev.startAt || '').slice(0, 10);
+  if (!d) return false;
+  return d < todayStr;
 }
 
 /** "YYYY-MM-DD" 形式のみを ISO 日時に変換。妥当な年でなければ undefined（創作日付の混入防止）。 */
