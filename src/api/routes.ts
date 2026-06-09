@@ -143,6 +143,8 @@ api.get('/diag/hotel', async (c) => {
   };
   // 2) 生の空室検索（指定日・adultNum=2）
   if (kw.hotels.length && checkin && checkout && env.RAKUTEN_APP_ID && env.RAKUTEN_ACCESS_KEY) {
+    // 楽天は1req/秒。キーワード検索直後だと429になるので間隔を空ける。
+    await new Promise((r) => setTimeout(r, 1200));
     const nos = kw.hotels.map((h) => h.hotelNo).filter((n): n is number => typeof n === 'number').slice(0, 5);
     const params = new URLSearchParams({
       applicationId: env.RAKUTEN_APP_ID,

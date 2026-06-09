@@ -31,6 +31,24 @@ const ENDPOINT = 'https://openapi.rakuten.co.jp/engine/api/Travel/KeywordHotelSe
 const VACANT_ENDPOINT = 'https://openapi.rakuten.co.jp/engine/api/Travel/VacantHotelSearch/20170426';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// 楽天APIは「1秒1リクエスト」。これを超えると 429 になり指定日価格が取れず最低料金に落ちる。
+// 直近の呼び出しからの間隔を空け、429なら待って再試行する（呼び出し全体で共有）。
+let rakutenLastAt = 0;
+const RAKUTEN_MIN_MS = 1100;
+async function rakutenFetch(url: string, headers: Record<string, string>, attempts = 3): Promise<Response> {
+  let res: Response | null = null;
+  for (let i = 0; i < attempts; i++) {
+    const since = Date.now() - rakutenLastAt;
+    if (since < RAKUTEN_MIN_MS) await sleep(RAKUTEN_MIN_MS - since);
+    rakutenLastAt = Date.now();
+    res = await fetch(url, { headers });
+    if (res.status !== 429) return res;
+    if (i < attempts - 1) await sleep(1300); // "Try again in 1 seconds" を尊重して少し待つ
+  }
+  return res as Response;
+}
+
 /**
  * 楽天トラベル KeywordHotelSearch（新API）でエリアの実在ホテルを検索する。
  * 希望条件（露天風呂・夕食付き等）をキーワードに足し、予算内に絞って料金の安い順で返す。
@@ -64,7 +82,8 @@ export async function rakutenHotelSearch(
 
   let all: HotelOption[] = [];
   let status = 0;
-  const MAX_PAGES = 3; // 1ページ30件 × 最大3ページ = 最大90件まで取得
+  // 1ページ30件。レート制限(1req/秒)で時間がかかるので、選択肢として十分な2ページに抑える。
+  const MAX_PAGES = 2;
 
   for (let page = 1; page <= MAX_PAGES; page++) {
     const params = new URLSearchParams({
@@ -77,7 +96,7 @@ export async function rakutenHotelSearch(
     });
     let text = '';
     try {
-      const res = await fetch(`${ENDPOINT}?${params.toString()}`, { headers });
+      const res = await rakutenFetch(`${ENDPOINT}?${params.toString()}`, headers);
       status = res.status;
       text = await res.text();
     } catch (e) {
@@ -200,7 +219,7 @@ async function fetchVacantPrices(
       hotelNo: batch.join(','),
     });
     try {
-      const res = await fetch(`${VACANT_ENDPOINT}?${params.toString()}`, { headers });
+      const res = await rakutenFetch(`${VACANT_ENDPOINT}?${params.toString()}`, headers);
       const data: any = await res.json();
       if (data?.error) continue; // バッチ全体が満室/該当なし等
       for (const wrap of data.hotels ?? []) {
