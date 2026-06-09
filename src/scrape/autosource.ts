@@ -223,26 +223,15 @@ export async function discoverAndScrape(
   };
 }
 
-/**
- * イベント情報サイト（ウォーカープラス等）を検索でねらい、各ページの JSON-LD から
- * 開催日つきイベントを取り出す。AI抽出は行わない（schema.orgのEventを読むだけ＝無料）。
- * 件数・取得ページ数は控えめにして速度と相手サーバーへの負荷を抑える。
- */
-async function collectEventSites(
-  http: HttpClient,
-  env: Env,
-  area: string,
-  month?: number,
-): Promise<NormalizedEvent[]> {
+/** イベントサイトのURLを検索で集める（ウォーカープラス等のホストだけ残す）。 */
+async function findEventSiteUrls(http: HttpClient, env: Env, area: string, month?: number): Promise<string[]> {
   const queries = buildEventQueries(area, month);
   const urls: string[] = [];
   for (const q of queries) {
     if (urls.length >= 6) break;
-    // jina 検索（あれば）→ 無ければ通常検索。イベントサイトのURLだけを拾う。
     let found: string[] = [];
     try {
-      const jina = await jinaSearch(http, env, q);
-      found = jina.map((r) => r.url);
+      found = (await jinaSearch(http, env, q)).map((r) => r.url);
     } catch {
       /* jina 不調 */
     }
@@ -258,19 +247,104 @@ async function collectEventSites(
       if (h && isEventSiteHost(h) && !urls.includes(u)) urls.push(u);
     }
   }
+  return urls;
+}
 
+/**
+ * イベントページの生HTML（JSON-LD入り）を取得する。
+ * 1) 直接取得（速い・JSON-LDそのまま）。2) ボットブロックで弾かれたら Jina Reader を
+ * html返却モード（X-Return-Format: html）で。サーバーIP＋bot回避でld+jsonを保持できる。
+ * 返り値の via で、どの経路で取れたか（または失敗か）が分かる。
+ */
+async function fetchEventHtml(
+  http: HttpClient,
+  env: Env,
+  url: string,
+): Promise<{ html: string; via: 'direct' | 'jina' | 'fail' }> {
+  try {
+    const html = await http.getText(url, { skipRobots: true });
+    if (html && html.includes('application/ld+json')) return { html, via: 'direct' };
+  } catch {
+    /* 直接取得が弾かれた → Jina へ */
+  }
+  try {
+    const headers: Record<string, string> = { 'X-Return-Format': 'html' };
+    if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
+    const html = await http.getText(`https://r.jina.ai/${url}`, { skipRobots: true, headers });
+    if (html) return { html, via: 'jina' };
+  } catch {
+    /* Jina も失敗 */
+  }
+  return { html: '', via: 'fail' };
+}
+
+/**
+ * イベント情報サイト（ウォーカープラス等）を検索でねらい、各ページの JSON-LD から
+ * 開催日つきイベントを取り出す。AI抽出は行わない（schema.orgのEventを読むだけ＝無料）。
+ * 件数・取得ページ数は控えめにして速度と相手サーバーへの負荷を抑える。
+ */
+async function collectEventSites(
+  http: HttpClient,
+  env: Env,
+  area: string,
+  month?: number,
+): Promise<NormalizedEvent[]> {
+  const urls = await findEventSiteUrls(http, env, area, month);
   const events: NormalizedEvent[] = [];
   // 取得は最大4ページまで。各ページの JSON-LD(Event) を読む。
   for (const url of urls.slice(0, 4)) {
+    const { html } = await fetchEventHtml(http, env, url);
+    if (!html) continue;
     try {
-      const html = await http.getText(url, { skipRobots: true });
       const scripts = await extractJsonLdScripts(html);
       for (const ev of parseJsonLdEvents(scripts)) events.push(ev);
     } catch {
-      /* 1ページの失敗は無視 */
+      /* 1ページの解析失敗は無視 */
     }
   }
   return events;
+}
+
+/**
+ * 診断用: イベントサイト収集の各段階を可視化する（/api/diag/events）。
+ * どのURLが見つかり、どの経路で取得でき、JSON-LDから何件のイベントが取れたかを返す。
+ * 「本当にウォーカープラス等から取れているのか」を本番環境で実証するため。
+ */
+export async function diagCollectEventSites(env: Env, area: string, month?: number) {
+  const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 600 });
+  const queries = buildEventQueries(area, month);
+  const urls = await findEventSiteUrls(http, env, area, month);
+  const pages: {
+    url: string;
+    via: 'direct' | 'jina' | 'fail';
+    htmlLen: number;
+    jsonldBlocks: number;
+    events: { title: string; startAt?: string; endAt?: string; url?: string }[];
+  }[] = [];
+  let totalEvents = 0;
+  for (const url of urls.slice(0, 4)) {
+    const { html, via } = await fetchEventHtml(http, env, url);
+    let jsonldBlocks = 0;
+    let events: NormalizedEvent[] = [];
+    if (html) {
+      try {
+        const scripts = await extractJsonLdScripts(html);
+        jsonldBlocks = scripts.length;
+        events = parseJsonLdEvents(scripts);
+      } catch {
+        /* 解析失敗 */
+      }
+    }
+    totalEvents += events.length;
+    pages.push({
+      url,
+      via,
+      htmlLen: html.length,
+      jsonldBlocks,
+      events: events.map((e) => ({ title: e.title, startAt: e.startAt, endAt: e.endAt, url: e.url })),
+    });
+  }
+  return { area, month, queries, eventSiteUrls: urls, pages, totalEvents };
 }
 
 /** "YYYY-MM-DD" 形式のみを ISO 日時に変換。妥当な年でなければ undefined（創作日付の混入防止）。 */

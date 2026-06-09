@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, PlanRequest } from '../types';
 import { runScrape } from '../scrape/runner';
-import { discoverAndScrape, roundQueries } from '../scrape/autosource';
+import { discoverAndScrape, roundQueries, diagCollectEventSites } from '../scrape/autosource';
 import { processOneRound, runPlanJob } from '../scrape/collect-job';
 import { rakutenHotelSearch } from '../scrape/hotels';
 import { createPlan } from '../planner/create-plan';
@@ -180,6 +180,22 @@ api.get('/diag/hotel', async (c) => {
     out.vacant = { skipped: 'hotelが0 または 日付/認証が無い' };
   }
   return c.json(out);
+});
+
+// イベントサイト収集の実地診断。例: /api/diag/events?area=出雲市&month=11
+// 「本当にウォーカープラス等からイベントが取れているか」を本番で実証するため、
+// 見つかったURL・取得経路(direct/jina)・JSON-LDのEvent件数を返す。
+api.get('/diag/events', async (c) => {
+  const area = (c.req.query('area') || '').trim();
+  if (!area) return c.json({ error: 'area が必要です（例: /api/diag/events?area=出雲市&month=11）' }, 400);
+  const mq = Number(c.req.query('month'));
+  const month = Number.isFinite(mq) && mq >= 1 && mq <= 12 ? mq : undefined;
+  try {
+    const result = await diagCollectEventSites(c.env, area, month);
+    return c.json(result);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
 });
 
 /** リクエストURLからオリジン（https://host）を取り出す。楽天新APIのOrigin/Referer用。 */
