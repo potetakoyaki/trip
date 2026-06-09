@@ -45,7 +45,7 @@ import { AI_MODELS } from '../planner/ai';
 import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 import { searchPlaces } from '../data/places';
-import { suggestAreas } from '../planner/suggest';
+import { suggestAreas, suggestConcepts } from '../planner/suggest';
 import { generatePacking } from '../planner/packing';
 
 export const api = new Hono<{ Bindings: Env }>();
@@ -558,8 +558,8 @@ api.post('/packing', async (c) => {
 });
 
 // おまかせモード: 条件（出発地/交通/予算/日数/気分…）から行き先を3案AIが提案する。
-api.post('/suggest-areas', async (c) => {
-  const raw = (await c.req.json<any>().catch(() => null)) || {};
+// おまかせの条件（出発地・日数・気分・人数・時間上限等）を raw から組み立てる共通処理。
+function suggestOptsFromRaw(raw: any) {
   let days: number | undefined;
   if (DATE_RE.test(raw.startDate ?? '') && DATE_RE.test(raw.endDate ?? '')) {
     const s = new Date(`${raw.startDate}T00:00:00Z`).getTime();
@@ -569,7 +569,7 @@ api.post('/suggest-areas', async (c) => {
   } else if (Number.isFinite(Number(raw.days))) {
     days = Math.max(1, Math.min(30, Math.round(Number(raw.days))));
   }
-  const areas = await suggestAreas(c.env, {
+  return {
     origin: str(raw.origin, 80),
     transport: str(raw.transport, 40),
     budget: Number.isFinite(Number(raw.budget)) ? Number(raw.budget) : undefined,
@@ -582,7 +582,21 @@ api.post('/suggest-areas', async (c) => {
     maxHours: Number.isFinite(Number(raw.maxHours)) && Number(raw.maxHours) > 0 ? Number(raw.maxHours) : undefined,
     startDate: DATE_RE.test(raw.startDate ?? '') ? raw.startDate : undefined,
     exclude: strArr(raw.exclude),
-  });
+    concept: str(raw.concept, 60),
+  };
+}
+
+// おまかせ1段目: 「旅の方向性（テーマ）」を提案する（場所ではない）。
+api.post('/suggest-concepts', async (c) => {
+  const raw = (await c.req.json<any>().catch(() => null)) || {};
+  const concepts = await suggestConcepts(c.env, suggestOptsFromRaw(raw));
+  return c.json({ concepts });
+});
+
+// おまかせ2段目: 条件（＋テーマ concept）に合う行き先を提案する。
+api.post('/suggest-areas', async (c) => {
+  const raw = (await c.req.json<any>().catch(() => null)) || {};
+  const areas = await suggestAreas(c.env, suggestOptsFromRaw(raw));
   return c.json({ areas });
 });
 
