@@ -75,7 +75,6 @@
         <p id="auto-note" class="auto-note hidden">
           🎲 行き先はAIが提案します。出発地・交通・予算・日数・気分などを入れて「行き先を提案」を押してください。
         </p>
-        <div id="suggest-results" class="suggest-results hidden"></div>
         <form id="plan-form">
           <div class="field" id="area-field">
             <label for="area">エリア・行き先</label>
@@ -234,6 +233,8 @@
           <button type="button" id="cancel-btn" class="btn-cancel hidden">✕ キャンセル</button>
         </div>
         <p id="status" class="status"></p>
+        <!-- おまかせモードのAI提案。プラン作成ボタンの下にカードで出す。 -->
+        <div id="suggest-results" class="suggest-results hidden"></div>
       </section>
 
       <section id="result" class="card result-card hidden">

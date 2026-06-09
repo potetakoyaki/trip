@@ -835,15 +835,20 @@ function submitPlan(ev) {
   else startPlan();
 }
 
+// 直近に提案された行き先（「再考」で除外して別案を出すために保持）。
+let lastSuggested = [];
+
 // おまかせ: 条件から行き先を3案AIに提案させ、カードで表示する。
-async function suggestAreasFlow() {
+// exclude を渡すと、その行き先を避けて別案を出す（再考ボタン用）。
+async function suggestAreasFlow(exclude) {
   const body = buildPlanBody();
   if (!body.startDate || !body.endDate) {
     setStatus('日程を入れてください。', 'err');
     return;
   }
+  if (exclude && exclude.length) body.exclude = exclude;
   setBusy(true);
-  showIndet('AIが行き先を考えています…');
+  showIndet(exclude && exclude.length ? 'AIが別の行き先を考えています…' : 'AIが行き先を考えています…');
   setStatus('条件に合う行き先をAIが3案考えています…', '');
   try {
     const r = await api('/suggest-areas', {
@@ -853,7 +858,10 @@ async function suggestAreasFlow() {
     });
     hideProgressBar();
     setBusy(false);
-    renderSuggestions(r.areas || []);
+    const areas = r.areas || [];
+    // 再考の累積除外: 今回出た案も次の「再考」では避ける。
+    lastSuggested = Array.from(new Set([...(exclude || []), ...areas.map((a) => a.area)]));
+    renderSuggestions(areas);
   } catch (e) {
     hideProgressBar();
     setBusy(false);
@@ -883,7 +891,8 @@ function renderSuggestions(areas) {
         <button type="button" class="btn-secondary suggest-pick" data-i="${i}">この行き先でプランを作成 →</button>
       </div>`;
       })
-      .join('');
+      .join('') +
+    `<button type="button" id="suggest-again" class="btn-secondary suggest-again">🔄 別の案を再考する</button>`;
   box.classList.remove('hidden');
   box.querySelectorAll('.suggest-pick').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -896,6 +905,11 @@ function renderSuggestions(areas) {
       startPlan();
     });
   });
+  // 再考: これまで提案された行き先を除外して別案を出す。
+  const again = $('suggest-again');
+  if (again) again.addEventListener('click', () => suggestAreasFlow(lastSuggested));
+  // プラン作成ボタンの下に出るので、提案までスクロールして見せる。
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // 🎒 持ち物リスト: 現在のプラン条件（行き先・日付・天気・予定）からAIに作らせる。

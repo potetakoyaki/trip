@@ -1929,6 +1929,7 @@ footer {
   line-height: 1.6;
 }
 .suggest-results {
+  margin-top: 14px;
   margin-bottom: 16px;
 }
 .suggest-h {
@@ -1976,6 +1977,10 @@ footer {
 }
 .suggest-pick {
   margin-top: 10px;
+}
+.suggest-again {
+  width: 100%;
+  margin-top: 4px;
 }
 
 /* ---------- 持ち物リスト ---------- */
