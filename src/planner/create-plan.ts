@@ -104,15 +104,23 @@ export async function createPlan(
   }
 
   await report('AIがプランを組み立て中…', 82);
-  const plan = await generatePlan(env, events, body, { hotels: realHotels });
+  let plan = await generatePlan(env, events, body, { hotels: realHotels });
 
-  // スポットが1件も組み込めなかった場合は、情報取得に失敗している可能性が高い。
-  // 空のプランを「成功」として返さず、明確なエラーにする。
-  const itemCount = plan.days.reduce((n, d) => n + d.items.length, 0);
-  if (itemCount === 0) {
-    throw new Error(
-      'スポット情報を取得できませんでした（情報元のAPIエラー、またはこのエリアの情報が少ない可能性があります）。エリア名をもう少し具体的にするか、時間をおいて再度お試しください。',
-    );
+  // スポットが1件も無いとき（AIが一時停止＆収集も空など）は、収集データに依存せず
+  // AIの一般知識だけでもう一度組み立て直す。これでも空なら、赤いエラーで全滅させず
+  // 注記つきで返す（ユーザー要望: このエラーは出さない／ちゃんと作る）。
+  const countItems = (p: Plan) => p.days.reduce((n, d) => n + d.items.length, 0);
+  if (countItems(plan) === 0) {
+    try {
+      const retry = await generatePlan(env, [], { ...body, engine: undefined }, { hotels: realHotels });
+      if (countItems(retry) > 0) plan = retry;
+    } catch {
+      /* 再生成の失敗は無視して下の注記へ */
+    }
+  }
+  if (countItems(plan) === 0 && !plan.notice) {
+    plan.notice =
+      'このエリアの詳しい情報を十分に集められませんでした。エリア名をもう少し具体的にすると精度が上がります（例: 「島根」→「出雲市」）。少し時間をおいて再作成すると改善することがあります。';
   }
 
   // 地図用に各スポットの実座標を取得（AIの推測座標を上書き。エリア近傍のみ採用）。
