@@ -137,6 +137,12 @@ export async function rakutenHotelSearch(
     if (inPref.length) all = inPref;
   }
 
+  // ゲストハウス/ホステル/ドミトリー/カプセル等は宿泊先候補から除外する（ホテル・旅館を優先）。
+  // 名称と紹介文の両方で判定。全部除外で0件になるなら絞らない（候補ゼロを避ける）。
+  const EXCLUDE_LODGING = /ゲストハウス|ゲストイン|ホステル|hostel|guesthouse|guest house|ドミトリー|ドミトリ|カプセル|capsule|ライダーハウス/i;
+  const filtered = all.filter((h) => !EXCLUDE_LODGING.test(h.name) && !EXCLUDE_LODGING.test(h.why ?? ''));
+  if (filtered.length) all = filtered;
+
   // 指定日があれば、空室検索でその日の実価格を取得して上書きする。
   if (opts.checkinDate && opts.checkoutDate) {
     const nos = Array.from(

@@ -1551,6 +1551,16 @@ function evaluatePlan(plan, mode) {
       const hr = parseHoursRange(it.hours);
       const start = parseClock(sched.times[i]);
       if (!hr || start == null) return;
+      // 夜のイベント/時間に縛られない場所（花火・ライトアップ・夜景・祭り・公園・神社・寺・
+      // 温泉・展望台・海岸 等や、AIが夕方以降に意図的に置いた項目）は、日中の営業時間で
+      // 「間に合わない」と誤警告しない（プランと警告が矛盾するのを防ぐ）。
+      const ownTime = parseClock(it.time);
+      const looseHours =
+        /花火|ライトアップ|イルミ|ナイト|夜景|夜祭|夜市|祭|まつり|フェス|ビアガーデン|公園|神社|神宮|寺|展望|温泉|ビーチ|海岸|港|ナイトマーケット/.test(
+          it.title,
+        ) ||
+        (ownTime != null && ownTime >= 17 * 60);
+      if (looseHours) return;
       const stay = parseDurationMin(it.duration);
       if (start < hr.open) {
         warnings.push(
@@ -1898,7 +1908,7 @@ function renderHotels(hotels) {
     ${moreBtn}
     <p class="info-note">${
       anyDated
-        ? '※価格は指定した宿泊日の空室の最低料金（1泊1人〜）です。最新の空室・プランは予約ページでご確認ください。'
+        ? '※価格は指定した宿泊日の空室の最低料金（1泊1室〜）です。最新の空室・プランは予約ページでご確認ください。'
         : '※価格は目安です。空室・料金・プランは予約ページでご確認ください。'
     }</p>
   </div>`;
