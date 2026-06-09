@@ -864,6 +864,7 @@ async function suggestAreasFlow(exclude) {
   }
   if (exclude && exclude.length) body.exclude = exclude;
   setBusy(true);
+  $('result').classList.add('hidden'); // 行き先を選び直すので前回プランは画面に残さない
   showIndet(exclude && exclude.length ? 'AIが別の行き先を考えています…' : 'AIが行き先を考えています…');
   setStatus('条件に合う行き先をAIが3案考えています…', '');
   try {
@@ -982,6 +983,8 @@ async function startPlan() {
   if (!validateForm()) return;
   setBusy(true);
   $('recollect-btn').classList.add('hidden'); // 再収集ボタンが残らないよう隠す
+  // 再作成中は前回のプランを画面に残さない（古い結果が見えたままにしない）。
+  $('result').classList.add('hidden');
   // 新規作成中は前回プランの保存/共有/印刷/調整ボタンを隠す（完成後に出し直す）。
   $('save-btn').classList.add('hidden');
   $('share-btn').classList.add('hidden');
@@ -2050,13 +2053,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('save-btn').addEventListener('click', saveCurrentPlan);
   $('print-btn').addEventListener('click', () => window.print());
   $('wish-plan-btn').addEventListener('click', genFromWishlist);
-  $('refine-btn').addEventListener('click', () => {
+  $('refine-btn').addEventListener('click', async () => {
     const v = $('refine-input').value.trim();
     if (!v) {
       setStatus('変えたい内容を入力してください（例：グルメ多めに）。', 'err');
       $('refine-input').focus();
       return;
     }
+    const ok = await uiConfirm(`「${v}」でプランを作り直します。今表示中のプランは置き換わります。`, {
+      title: 'この内容で作り直す',
+      okText: '作り直す',
+      cancelText: 'やめる',
+    });
+    if (!ok) return;
     refinePlan(v);
   });
   $('variant-btn').addEventListener('click', () =>
