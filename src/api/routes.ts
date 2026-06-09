@@ -45,6 +45,7 @@ import { AI_MODELS } from '../planner/ai';
 import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 import { searchPlaces } from '../data/places';
+import { suggestAreas } from '../planner/suggest';
 
 export const api = new Hono<{ Bindings: Env }>();
 
@@ -235,6 +236,7 @@ function validatePlanRequest(body: any): { ok: true; req: PlanRequest } | { ok: 
     vibe: str(body.vibe, 40),
     origin: str(body.origin, 80),
     transport: str(body.transport, 40),
+    adults: Number.isFinite(Number(body.adults)) ? Math.max(1, Math.min(20, Math.round(Number(body.adults)))) : undefined,
     keyword: str(body.keyword, 80),
     hotelFeatures: strArr(body.hotelFeatures),
     autoScrape: body.autoScrape === false ? false : true,
@@ -488,6 +490,32 @@ api.post('/collect/cancel', async (c) => {
 });
 
 // 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
+// おまかせモード: 条件（出発地/交通/予算/日数/気分…）から行き先を3案AIが提案する。
+api.post('/suggest-areas', async (c) => {
+  const raw = (await c.req.json<any>().catch(() => null)) || {};
+  let days: number | undefined;
+  if (DATE_RE.test(raw.startDate ?? '') && DATE_RE.test(raw.endDate ?? '')) {
+    const s = new Date(`${raw.startDate}T00:00:00Z`).getTime();
+    const e = new Date(`${raw.endDate}T00:00:00Z`).getTime();
+    const d = Math.round((e - s) / 86400000) + 1;
+    if (d > 0 && d <= 30) days = d;
+  } else if (Number.isFinite(Number(raw.days))) {
+    days = Math.max(1, Math.min(30, Math.round(Number(raw.days))));
+  }
+  const areas = await suggestAreas(c.env, {
+    origin: str(raw.origin, 80),
+    transport: str(raw.transport, 40),
+    budget: Number.isFinite(Number(raw.budget)) ? Number(raw.budget) : undefined,
+    days,
+    companions: str(raw.companions, 40),
+    vibe: str(raw.vibe, 40),
+    interests: strArr(raw.interests),
+    adults: Number.isFinite(Number(raw.adults)) ? Number(raw.adults) : undefined,
+    keyword: str(raw.keyword, 80),
+  });
+  return c.json({ areas });
+});
+
 // 地名オートコンプリート。
 // 1) 静的リスト（都道府県＋主要市。漢字/ひらがな/カタカナ・即時）
 // 2) 国土地理院(GSI)の住所検索API（無料・キー不要）で全市町村＋施設＋テーマパーク等を補完。

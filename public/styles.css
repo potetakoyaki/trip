@@ -1871,6 +1871,82 @@ footer {
   cursor: default;
 }
 
+/* ---------- モードタブ（自分で決める / おまかせ） ---------- */
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  background: #f1ece1;
+  padding: 5px;
+  border-radius: 999px;
+}
+.mode-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 10px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mode-tab.active {
+  background: var(--card);
+  color: var(--brand-ink);
+  box-shadow: var(--shadow-sm);
+}
+.auto-note {
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  background: #fbf5e3;
+  border: 1px solid #f0e2b5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 0 0 14px;
+  line-height: 1.6;
+}
+.suggest-results {
+  margin-bottom: 16px;
+}
+.suggest-h {
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+.suggest-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 10px;
+  background: var(--card);
+}
+.suggest-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.suggest-area {
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--brand-ink);
+}
+.suggest-cost {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.suggest-reason {
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  margin: 6px 0 8px;
+  line-height: 1.6;
+}
+.suggest-pick {
+  margin-top: 10px;
+}
+
 /* ---------- 地名オートコンプリート ---------- */
 .autocomplete {
   position: relative;

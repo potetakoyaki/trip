@@ -761,6 +761,7 @@ function buildPlanBody() {
     vibe: $('vibe').value || undefined,
     origin: $('origin').value.trim() || undefined,
     transport: $('transport').value || undefined,
+    adults: $('adults') ? Number($('adults').value) : undefined,
     keyword: $('keyword').value.trim() || undefined,
     hotelFeatures: getHotelFeatures(),
     thorough: $('thorough').checked,
@@ -812,9 +813,86 @@ function readBusy() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // プラン作成は「ジョブ化してバックグラウンド実行」。画面を閉じても Cron が完成させる。
+let planMode = 'manual'; // 'manual' = 自分で決める / 'auto' = おまかせ（行き先もAI）
+
+function setPlanMode(mode) {
+  planMode = mode;
+  $('tab-manual').classList.toggle('active', mode === 'manual');
+  $('tab-auto').classList.toggle('active', mode === 'auto');
+  $('area-field').classList.toggle('hidden', mode === 'auto');
+  $('auto-note').classList.toggle('hidden', mode !== 'auto');
+  $('suggest-results').classList.add('hidden');
+  $('area').required = mode === 'manual';
+  $('submit-btn').querySelector('.btn-label').textContent =
+    mode === 'auto' ? '🎲 行き先を提案してもらう' : 'プランを作成する';
+}
+
 function submitPlan(ev) {
   ev.preventDefault();
-  startPlan();
+  if (planMode === 'auto') suggestAreasFlow();
+  else startPlan();
+}
+
+// おまかせ: 条件から行き先を3案AIに提案させ、カードで表示する。
+async function suggestAreasFlow() {
+  const body = buildPlanBody();
+  if (!body.startDate || !body.endDate) {
+    setStatus('日程を入れてください。', 'err');
+    return;
+  }
+  setBusy(true);
+  showIndet('AIが行き先を考えています…');
+  setStatus('条件に合う行き先をAIが3案考えています…', '');
+  try {
+    const r = await api('/suggest-areas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    hideProgressBar();
+    setBusy(false);
+    renderSuggestions(r.areas || []);
+  } catch (e) {
+    hideProgressBar();
+    setBusy(false);
+    setStatus('行き先の提案に失敗しました: ' + e.message, 'err');
+  }
+}
+
+function renderSuggestions(areas) {
+  const box = $('suggest-results');
+  if (!areas.length) {
+    box.classList.add('hidden');
+    setStatus('提案が得られませんでした。条件を変えて再度お試しください。', 'err');
+    return;
+  }
+  setStatus('行き先を選ぶと、その地でプランを作成します。', 'ok');
+  box.innerHTML =
+    `<div class="suggest-h">🎲 AIのおすすめ行き先（${areas.length}案）</div>` +
+    areas
+      .map((a, i) => {
+        const hl = (a.highlights || []).map((h) => `<span class="tag">${esc(h)}</span>`).join('');
+        const cost = a.roughCost ? `<span class="suggest-cost">目安 ${yen(a.roughCost)}/人</span>` : '';
+        return `<div class="suggest-card" data-area="${esc(a.area)}">
+        <div class="suggest-top"><span class="suggest-area">${esc(a.area)}</span>${cost}</div>
+        ${a.reason ? `<p class="suggest-reason">${esc(a.reason)}</p>` : ''}
+        ${hl ? `<div class="highlights">${hl}</div>` : ''}
+        <button type="button" class="btn-secondary suggest-pick" data-i="${i}">この行き先でプランを作成 →</button>
+      </div>`;
+      })
+      .join('');
+  box.classList.remove('hidden');
+  box.querySelectorAll('.suggest-pick').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.suggest-card');
+      const area = card ? card.getAttribute('data-area') : '';
+      if (!area) return;
+      $('area').value = area;
+      setPlanMode('manual'); // 行き先が決まったので通常モードへ
+      box.classList.add('hidden');
+      startPlan();
+    });
+  });
 }
 
 // 実際にプラン作成ジョブを開始する（フォーム送信・行きたい作成・作り直しから共通で使う）。
@@ -1859,6 +1937,8 @@ function setupAreaAutocomplete() {
 window.addEventListener('DOMContentLoaded', async () => {
   initDates();
   setupAreaAutocomplete();
+  $('tab-manual').addEventListener('click', () => setPlanMode('manual'));
+  $('tab-auto').addEventListener('click', () => setPlanMode('auto'));
   $('plan-form').addEventListener('submit', submitPlan);
   $('collect-btn').addEventListener('click', () => deepCollect(false));
   $('recollect-btn').addEventListener('click', () => deepCollect(true));
