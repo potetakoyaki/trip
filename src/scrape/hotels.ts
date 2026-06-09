@@ -223,10 +223,22 @@ async function fetchVacantPrices(
       const data: any = await res.json();
       if (data?.error) continue; // バッチ全体が満室/該当なし等
       for (const wrap of data.hotels ?? []) {
-        const info = wrap.hotel?.[0]?.hotelBasicInfo;
-        const no = Number(info?.hotelNo);
-        const charge = info?.hotelMinCharge;
-        if (Number.isFinite(no) && typeof charge === 'number' && charge > 0) out.set(no, charge);
+        const parts: any[] = Array.isArray(wrap.hotel) ? wrap.hotel : [];
+        const no = Number(parts[0]?.hotelBasicInfo?.hotelNo);
+        if (!Number.isFinite(no)) continue;
+        // 指定日に実際に泊まれる各部屋プランの「1泊あたり総額(dailyCharge.total)」の最小＝実最安(部屋単位)。
+        // hotelMinCharge(全プランの底値・相部屋の人数割り等)ではなく、これが実価格。
+        let minTotal: number | undefined;
+        for (const part of parts) {
+          const rooms = part?.roomInfo;
+          if (!Array.isArray(rooms)) continue;
+          for (const r of rooms) {
+            const t = r?.dailyCharge?.total;
+            if (typeof t === 'number' && t > 0 && (minTotal == null || t < minTotal)) minTotal = t;
+          }
+        }
+        // 部屋単位の総額を人数で割って「1泊1人あたり」に（アプリの費用表示は1人あたり基準）。
+        if (minTotal != null) out.set(no, Math.round(minTotal / Math.max(1, adults)));
       }
     } catch {
       /* このバッチは諦めて次へ */
