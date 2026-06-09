@@ -1749,7 +1749,7 @@ function renderCostCard() {
 
 function renderCost(c) {
   // 日帰り（0泊）は宿泊費の行を出さない。
-  const hotelLabel = `ホテル${c.nights ? `（${c.nights}泊）` : ''}${c.hotelName ? `・${esc(c.hotelName)}` : ''}`;
+  const hotelLabel = `ホテル${c.nights ? `（${c.nights}泊・1室）` : ''}${c.hotelName ? `・${esc(c.hotelName)}` : ''}`;
   const hotelVal = c.hotelUnknown ? '料金不明' : yen(c.hotel);
   const hotelRow = c.nights ? `<div class="cost-row"><span>${hotelLabel}</span><span>${hotelVal}</span></div>` : '';
   const rows =
@@ -1785,7 +1785,7 @@ function renderHotels(hotels) {
       const link = h.url
         ? `<a class="hotel-link" href="${esc(h.url)}" target="_blank" rel="noopener">楽天トラベルで見る →</a>`
         : `<a class="hotel-link" href="https://www.google.com/search?q=${encodeURIComponent(h.name + ' 宿泊 予約')}" target="_blank" rel="noopener">空室・料金を探す →</a>`;
-      const priceLabel = h.datedPrice ? '/ 泊・人〜（指定日）' : '/ 泊・人〜';
+      const priceLabel = h.datedPrice ? '/ 泊・室〜（指定日）' : '/ 泊〜（最低料金）';
       const checked = idx === selectedHotelIdx ? ' checked' : '';
       const extra = idx >= HOTELS_SHOWN ? ' hotel-extra hidden' : '';
       return `<div class="hotel${checked ? ' selected' : ''}${extra}" data-hotel="${idx}">

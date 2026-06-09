@@ -237,8 +237,8 @@ async function fetchVacantPrices(
             if (typeof t === 'number' && t > 0 && (minTotal == null || t < minTotal)) minTotal = t;
           }
         }
-        // 部屋単位の総額を人数で割って「1泊1人あたり」に（アプリの費用表示は1人あたり基準）。
-        if (minTotal != null) out.set(no, Math.round(minTotal / Math.max(1, adults)));
+        // 1室1泊の総額をそのまま使う（楽天トラベルの表示＝1室いくらに合わせる）。
+        if (minTotal != null) out.set(no, minTotal);
       }
     } catch {
       /* このバッチは諦めて次へ */
