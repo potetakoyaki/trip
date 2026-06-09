@@ -36,14 +36,48 @@ export function isEventSiteHost(host: string): boolean {
   return EVENT_SITE_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
 }
 
-/** イベント収集用の検索クエリ。ウォーカープラスを明示的に狙い、旅行月の季節イベントも拾う。 */
+/** 旅行月に応じた季節イベントのキーワード（別ジャンルのリストを増やして件数を稼ぐ）。 */
+function seasonalEventKeyword(month?: number): string {
+  if (!month || month < 1 || month > 12) return '';
+  if (month >= 3 && month <= 4) return '桜 花見';
+  if (month >= 5 && month <= 6) return '新緑 バラ あじさい';
+  if (month >= 7 && month <= 8) return '夏祭り 花火';
+  if (month === 9) return '秋祭り コスモス';
+  if (month >= 10 && month <= 11) return '紅葉 ライトアップ';
+  return 'イルミネーション 初詣'; // 12〜2月
+}
+
+/**
+ * イベント収集用の検索クエリ。ウォーカープラスを明示的に狙い、ジャンル（祭り/花火/
+ * グルメ/展覧会）と旅行月の季節イベントを横断して、できるだけ多くのリストを拾う。
+ */
 export function buildEventQueries(area: string, month?: number): string[] {
   const m = month && month >= 1 && month <= 12 ? `${month}月` : '';
-  return [
-    `${area} イベント 祭り 開催 ${m}`.replace(/\s+/g, ' ').trim(),
-    `${area} 花火大会 ${m}`.replace(/\s+/g, ' ').trim(),
+  const season = seasonalEventKeyword(month);
+  const raw = [
+    `${area} イベント 祭り 開催 ${m}`,
+    `${area} 花火大会 ${m}`,
+    `${area} グルメ フード イベント ${m}`,
+    `${area} 展覧会 美術展 ${m}`,
+    season ? `${area} ${season} ${m}` : '',
     `${area} イベント walkerplus`,
+    `${area} まつり 花火 walkerplus`,
   ];
+  return raw.map((q) => q.replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+
+/**
+ * リストURL（末尾が "/" のもの。walkerplus等）にページ送り(N.html)を付けて複数ページ分の
+ * URLを作る。1リスト=約10件なので、ページ送りで件数を大きく増やせる。
+ * クエリ無し(?#無し)・末尾スラッシュのURLにだけ適用（誤URL生成を避ける）。
+ */
+export function eventListPageUrls(url: string, maxPage: number): string[] {
+  const out = [url];
+  const m = url.match(/^(https?:\/\/[^?#]*\/)$/);
+  if (m && maxPage > 1) {
+    for (let p = 2; p <= maxPage; p++) out.push(`${m[1]}${p}.html`);
+  }
+  return out;
 }
 
 const BROWSER_UA =
@@ -233,7 +267,7 @@ async function findEventSiteUrls(http: HttpClient, env: Env, area: string, month
   const queries = buildEventQueries(area, month);
   const urls: string[] = [];
   for (const q of queries) {
-    if (urls.length >= 6) break;
+    if (urls.length >= 16) break;
     let found: string[] = [];
     try {
       found = (await jinaSearch(http, env, q)).map((r) => r.url);
@@ -283,51 +317,69 @@ async function fetchEventHtml(
   return { html: '', via: 'fail' };
 }
 
+/** 発見した各リストURLにページ送り(N.html)を足して、取得対象URLを最大 maxPages 件作る。 */
+function expandEventTargets(baseUrls: string[], maxPages: number): string[] {
+  const targets: string[] = [];
+  for (const u of baseUrls) {
+    for (const pu of eventListPageUrls(u, 4)) {
+      if (!targets.includes(pu)) targets.push(pu);
+    }
+    if (targets.length >= maxPages) break;
+  }
+  return targets.slice(0, maxPages);
+}
+
+/** 同一イベントの重複を除く（複数リスト/ページに同じ催しが載るため）。 */
+function dedupEvents(events: NormalizedEvent[]): NormalizedEvent[] {
+  const seen = new Set<string>();
+  const out: NormalizedEvent[] = [];
+  for (const ev of events) {
+    const key = ev.sourceEventId || ev.url || ev.title;
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    out.push(ev);
+  }
+  return out;
+}
+
 /**
  * イベント情報サイト（ウォーカープラス等）を検索でねらい、各ページの JSON-LD から
  * 開催日つきイベントを取り出す。AI抽出は行わない（schema.orgのEventを読むだけ＝無料）。
- * 件数・取得ページ数は控えめにして速度と相手サーバーへの負荷を抑える。
+ * ジャンル/季節でリストを増やし、ページ送りで深掘りし、最大 maxPages ページを並列取得する。
  */
 async function collectEventSites(
   http: HttpClient,
   env: Env,
   area: string,
   month?: number,
+  maxPages = 16,
 ): Promise<NormalizedEvent[]> {
-  const urls = await findEventSiteUrls(http, env, area, month);
-  const events: NormalizedEvent[] = [];
-  // 取得は最大4ページまで。各ページの JSON-LD(Event) を読む。
-  for (const url of urls.slice(0, 4)) {
+  const base = await findEventSiteUrls(http, env, area, month);
+  const targets = expandEventTargets(base, maxPages);
+  // 別ホスト(hanabi./koyo./www./jorudan/iko-yo)は並列で速く、同ホストはHttpClientが間隔調整。
+  const perPage = await mapLimit(targets, 6, async (url) => {
     const { html } = await fetchEventHtml(http, env, url);
-    if (!html) continue;
+    if (!html) return [] as NormalizedEvent[];
     try {
-      const scripts = await extractJsonLdScripts(html);
-      for (const ev of parseJsonLdEvents(scripts)) events.push(ev);
+      return parseJsonLdEvents(await extractJsonLdScripts(html));
     } catch {
-      /* 1ページの解析失敗は無視 */
+      return [] as NormalizedEvent[];
     }
-  }
-  return events;
+  });
+  return dedupEvents(perPage.flat());
 }
 
 /**
  * 診断用: イベントサイト収集の各段階を可視化する（/api/diag/events）。
- * どのURLが見つかり、どの経路で取得でき、JSON-LDから何件のイベントが取れたかを返す。
- * 「本当にウォーカープラス等から取れているのか」を本番環境で実証するため。
+ * どのリストURLが見つかり、何ページ取得し、重複除去/過去除外後に何件になるかを返す。
+ * 「本当にウォーカープラス等から十分な件数が取れているか」を本番で実証するため。
  */
-export async function diagCollectEventSites(env: Env, area: string, month?: number) {
+export async function diagCollectEventSites(env: Env, area: string, month?: number, maxPages = 16) {
   const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 600 });
   const queries = buildEventQueries(area, month);
-  const urls = await findEventSiteUrls(http, env, area, month);
-  const pages: {
-    url: string;
-    via: 'direct' | 'jina' | 'fail';
-    htmlLen: number;
-    jsonldBlocks: number;
-    events: { title: string; startAt?: string; endAt?: string; url?: string }[];
-  }[] = [];
-  let totalEvents = 0;
-  for (const url of urls.slice(0, 4)) {
+  const base = await findEventSiteUrls(http, env, area, month);
+  const targets = expandEventTargets(base, maxPages);
+  const pages = await mapLimit(targets, 6, async (url) => {
     const { html, via } = await fetchEventHtml(http, env, url);
     let jsonldBlocks = 0;
     let events: NormalizedEvent[] = [];
@@ -340,16 +392,22 @@ export async function diagCollectEventSites(env: Env, area: string, month?: numb
         /* 解析失敗 */
       }
     }
-    totalEvents += events.length;
-    pages.push({
-      url,
-      via,
-      htmlLen: html.length,
-      jsonldBlocks,
-      events: events.map((e) => ({ title: e.title, startAt: e.startAt, endAt: e.endAt, url: e.url })),
-    });
-  }
-  return { area, month, queries, eventSiteUrls: urls, pages, totalEvents };
+    return { url, via, htmlLen: html.length, jsonldBlocks, events };
+  });
+  const distinct = dedupEvents(pages.flatMap((p) => p.events));
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = distinct.filter((e) => !isPastEventDate(e, today));
+  return {
+    area,
+    month,
+    queries,
+    eventSiteUrls: base,
+    fetchedPages: targets.length,
+    distinctEvents: distinct.length,
+    upcomingEvents: upcoming.length, // 実際に保存される件数（過去除外後）
+    perPage: pages.map((p) => ({ url: p.url, via: p.via, jsonldBlocks: p.jsonldBlocks, events: p.events.length })),
+    sample: upcoming.slice(0, 20).map((e) => ({ title: e.title, startAt: e.startAt, endAt: e.endAt, url: e.url })),
+  };
 }
 
 /**

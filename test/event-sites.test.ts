@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isEventSiteHost, buildEventQueries, isPastEventDate } from '../src/scrape/autosource';
+import { isEventSiteHost, buildEventQueries, isPastEventDate, eventListPageUrls } from '../src/scrape/autosource';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 
 describe('isEventSiteHost: イベント情報サイトの判定', () => {
@@ -31,6 +31,32 @@ describe('buildEventQueries: イベント検索クエリ', () => {
   it('月なし/範囲外は月を付けない', () => {
     expect(buildEventQueries('金沢市')).toContain('金沢市 イベント 祭り 開催');
     expect(buildEventQueries('金沢市', 13)).toContain('金沢市 花火大会');
+  });
+
+  it('ジャンル横断で複数クエリを返し件数を稼ぐ', () => {
+    const qs = buildEventQueries('松江市', 8);
+    expect(qs.length).toBeGreaterThanOrEqual(6);
+    expect(qs.some((q) => q.includes('グルメ'))).toBe(true);
+    expect(qs.some((q) => q.includes('展覧会'))).toBe(true);
+    // 8月は夏祭り/花火の季節キーワードが入る
+    expect(qs.some((q) => q.includes('夏祭り'))).toBe(true);
+  });
+});
+
+describe('eventListPageUrls: ページ送りURL生成', () => {
+  it('末尾スラッシュのリストURLに N.html を付ける', () => {
+    const urls = eventListPageUrls('https://www.walkerplus.com/event_list/ar0832/', 4);
+    expect(urls).toEqual([
+      'https://www.walkerplus.com/event_list/ar0832/',
+      'https://www.walkerplus.com/event_list/ar0832/2.html',
+      'https://www.walkerplus.com/event_list/ar0832/3.html',
+      'https://www.walkerplus.com/event_list/ar0832/4.html',
+    ]);
+  });
+
+  it('クエリ付き/末尾が非スラッシュのURLはそのまま（誤生成しない）', () => {
+    expect(eventListPageUrls('https://x.com/a?b=1', 3)).toEqual(['https://x.com/a?b=1']);
+    expect(eventListPageUrls('https://x.com/detail/e001', 3)).toEqual(['https://x.com/detail/e001']);
   });
 });
 
