@@ -512,6 +512,8 @@ api.post('/suggest-areas', async (c) => {
     interests: strArr(raw.interests),
     adults: Number.isFinite(Number(raw.adults)) ? Number(raw.adults) : undefined,
     keyword: str(raw.keyword, 80),
+    maxHours: Number.isFinite(Number(raw.maxHours)) && Number(raw.maxHours) > 0 ? Number(raw.maxHours) : undefined,
+    startDate: DATE_RE.test(raw.startDate ?? '') ? raw.startDate : undefined,
   });
   return c.json({ areas });
 });

@@ -762,6 +762,7 @@ function buildPlanBody() {
     origin: $('origin').value.trim() || undefined,
     transport: $('transport').value || undefined,
     adults: $('adults') ? Number($('adults').value) : undefined,
+    maxHours: $('maxHours') && $('maxHours').value ? Number($('maxHours').value) : undefined,
     keyword: $('keyword').value.trim() || undefined,
     hotelFeatures: getHotelFeatures(),
     thorough: $('thorough').checked,
@@ -875,6 +876,7 @@ function renderSuggestions(areas) {
         const cost = a.roughCost ? `<span class="suggest-cost">目安 ${yen(a.roughCost)}/人</span>` : '';
         return `<div class="suggest-card" data-area="${esc(a.area)}">
         <div class="suggest-top"><span class="suggest-area">${esc(a.area)}</span>${cost}</div>
+        ${a.hook ? `<p class="suggest-hook">✨ ${esc(a.hook)}</p>` : ''}
         ${a.reason ? `<p class="suggest-reason">${esc(a.reason)}</p>` : ''}
         ${hl ? `<div class="highlights">${hl}</div>` : ''}
         <button type="button" class="btn-secondary suggest-pick" data-i="${i}">この行き先でプランを作成 →</button>
