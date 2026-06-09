@@ -597,12 +597,16 @@ export async function searchEvents(db: D1Database, query: EventQuery): Promise<E
     where.push('(title LIKE ? OR description LIKE ?)');
     binds.push(`%${query.q}%`, `%${query.q}%`);
   }
-  // 日付フィルタ: 日付不明(start_at IS NULL)は常に候補に残す
-  if (query.from) {
-    where.push('(start_at IS NULL OR start_at >= ?)');
+  // 日付フィルタ: 開催期間[start_at, end_at]が旅行期間[from, to]と「重なる」ものを残す。
+  // 終了日が無い催しは単日(end_at=start_at)とみなす。日付不明(start_at IS NULL)は常に残す。
+  // これで長期開催(会期が旅行日をまたぐ展覧会・ビアガーデン等)を取りこぼさない。
+  if (query.from && query.to) {
+    where.push('(start_at IS NULL OR (start_at <= ? AND COALESCE(end_at, start_at) >= ?))');
+    binds.push(`${query.to}T23:59:59`, `${query.from}T00:00:00`);
+  } else if (query.from) {
+    where.push('(start_at IS NULL OR COALESCE(end_at, start_at) >= ?)');
     binds.push(`${query.from}T00:00:00`);
-  }
-  if (query.to) {
+  } else if (query.to) {
     where.push('(start_at IS NULL OR start_at <= ?)');
     binds.push(`${query.to}T23:59:59`);
   }
