@@ -48,20 +48,18 @@ function seasonalEventKeyword(month?: number): string {
 }
 
 /**
- * イベント収集用の検索クエリ。ウォーカープラスを明示的に狙い、ジャンル（祭り/花火/
- * グルメ/展覧会）と旅行月の季節イベントを横断して、できるだけ多くのリストを拾う。
+ * イベント収集用の検索クエリ。検索（キー無しJina等）は数回で制限がかかるため、
+ * クエリ数は絞り、ウォーカープラスを"最優先"に当てて確実にリストURLを得る。件数は
+ * リストのページ送り(N.html)で稼ぐ方針（検索を増やすより堅牢で速い）。
  */
 export function buildEventQueries(area: string, month?: number): string[] {
   const m = month && month >= 1 && month <= 12 ? `${month}月` : '';
   const season = seasonalEventKeyword(month);
   const raw = [
-    `${area} イベント 祭り 開催 ${m}`,
-    `${area} 花火大会 ${m}`,
-    `${area} グルメ フード イベント ${m}`,
-    `${area} 展覧会 美術展 ${m}`,
-    season ? `${area} ${season} ${m}` : '',
-    `${area} イベント walkerplus`,
-    `${area} まつり 花火 walkerplus`,
+    `${area} イベント walkerplus`, // ← 最優先（event_list を当てる）
+    `${area} 祭り 花火 walkerplus`, // ← hanabi 等の別ジャンルリスト
+    season ? `${area} ${season} walkerplus` : '', // ← 季節もの(koyo等)
+    `${area} イベント 開催 ${m}`, // 保険: 他イベントサイト/一般結果も拾う
   ];
   return raw.map((q) => q.replace(/\s+/g, ' ').trim()).filter(Boolean);
 }
@@ -317,16 +315,23 @@ async function fetchEventHtml(
   return { html: '', via: 'fail' };
 }
 
-/** 発見した各リストURLにページ送り(N.html)を足して、取得対象URLを最大 maxPages 件作る。 */
-function expandEventTargets(baseUrls: string[], maxPages: number): string[] {
+/**
+ * 発見した各リストURLにページ送り(N.html)を足して、取得対象URLを最大 maxPages 件作る。
+ * 「全リストの1ページ目 → 全リストの2ページ目 …」とラウンドロビンで並べ、特定リストに
+ * 偏らず広く拾う（最初のリストが夏の花火だけ等の偏り対策）。
+ */
+function expandEventTargets(baseUrls: string[], maxPages: number, perBase = 8): string[] {
+  const lists = baseUrls.map((u) => eventListPageUrls(u, perBase));
   const targets: string[] = [];
-  for (const u of baseUrls) {
-    for (const pu of eventListPageUrls(u, 4)) {
-      if (!targets.includes(pu)) targets.push(pu);
+  for (let i = 0; i < perBase && targets.length < maxPages; i++) {
+    for (const list of lists) {
+      if (list[i] && !targets.includes(list[i])) {
+        targets.push(list[i]);
+        if (targets.length >= maxPages) break;
+      }
     }
-    if (targets.length >= maxPages) break;
   }
-  return targets.slice(0, maxPages);
+  return targets;
 }
 
 /** 同一イベントの重複を除く（複数リスト/ページに同じ催しが載るため）。 */

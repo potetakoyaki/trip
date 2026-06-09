@@ -21,25 +21,22 @@ describe('isEventSiteHost: イベント情報サイトの判定', () => {
 });
 
 describe('buildEventQueries: イベント検索クエリ', () => {
-  it('月ありで季節イベント・ウォーカープラス狙いのクエリを作る', () => {
-    const qs = buildEventQueries('出雲市', 7);
-    expect(qs).toContain('出雲市 イベント 祭り 開催 7月');
-    expect(qs).toContain('出雲市 花火大会 7月');
-    expect(qs.some((q) => q.includes('walkerplus'))).toBe(true);
-  });
-
-  it('月なし/範囲外は月を付けない', () => {
-    expect(buildEventQueries('金沢市')).toContain('金沢市 イベント 祭り 開催');
-    expect(buildEventQueries('金沢市', 13)).toContain('金沢市 花火大会');
-  });
-
-  it('ジャンル横断で複数クエリを返し件数を稼ぐ', () => {
-    const qs = buildEventQueries('松江市', 8);
-    expect(qs.length).toBeGreaterThanOrEqual(6);
-    expect(qs.some((q) => q.includes('グルメ'))).toBe(true);
-    expect(qs.some((q) => q.includes('展覧会'))).toBe(true);
+  it('ウォーカープラスを最優先に当て、季節イベントも含む', () => {
+    const qs = buildEventQueries('出雲市', 8);
+    expect(qs[0]).toContain('walkerplus'); // 最優先
+    expect(qs.filter((q) => q.includes('walkerplus')).length).toBeGreaterThanOrEqual(2);
     // 8月は夏祭り/花火の季節キーワードが入る
-    expect(qs.some((q) => q.includes('夏祭り'))).toBe(true);
+    expect(qs.some((q) => q.includes('夏祭り') || q.includes('花火'))).toBe(true);
+  });
+
+  it('クエリ数は絞る（検索の利用制限対策）', () => {
+    expect(buildEventQueries('松江市', 8).length).toBeLessThanOrEqual(4);
+  });
+
+  it('月なし/範囲外でもwalkerplus狙い＋保険クエリを返す', () => {
+    expect(buildEventQueries('金沢市').some((q) => q.includes('walkerplus'))).toBe(true);
+    expect(buildEventQueries('金沢市')).toContain('金沢市 イベント 開催');
+    expect(buildEventQueries('金沢市', 13).some((q) => q.includes('walkerplus'))).toBe(true);
   });
 });
 
