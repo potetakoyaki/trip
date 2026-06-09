@@ -224,4 +224,20 @@ export interface Plan {
   engine: 'rule' | 'ai';
   /** 重要なお知らせ（例: AI無料枠切れで簡易プランに切替えた等）。あれば結果上部に表示。 */
   notice?: string;
+  /** プランに入らなかった「その他の候補スポット」（結果の一番下に一覧表示）。保存プランにも含める。 */
+  candidates?: PlanCandidate[];
+}
+
+/** プランに採用しなかった候補スポット（収集済みイベント/スポットの抜粋）。 */
+export interface PlanCandidate {
+  title: string;
+  category?: string;
+  location?: string;
+  prefecture?: string;
+  url?: string;
+  price?: number;
+  description?: string;
+  hours?: string;
+  lat?: number;
+  lng?: number;
 }

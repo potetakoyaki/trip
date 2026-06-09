@@ -1,10 +1,10 @@
 import type { Env, Plan, PlanRequest } from '../types';
-import { runScrape } from '../scrape/runner';
 import { discoverAndScrape } from '../scrape/autosource';
 import { geocodePlanItems, geocodeQuery, haversineKm, reversePrefecture } from '../scrape/geocode';
 import { fetchRakutenHotels } from '../scrape/hotels';
 import { searchEvents, savePlan, ensureCoveredTable, isCovered, markCovered } from '../db/repository';
 import { fetchForecast } from '../scrape/weather';
+import { prefectureOf } from '../data/places';
 import { generatePlan } from './planner';
 
 export interface CreatePlanResult {
@@ -38,12 +38,9 @@ export async function createPlan(
   };
 
   await report('情報を準備しています…', 8);
-  let scrape: { ran: boolean; total?: number; results?: unknown } = { ran: false };
-  if (body.autoScrape !== false) {
-    await report('最新情報を確認中…', 15);
-    const summary = await runScrape(env);
-    scrape = { ran: true, total: summary.total, results: summary.results };
-  }
+  // 注: 全ソースの定期スクレイプ(runScrape)はCron(毎分/6h)が担う。プラン作成では実行しない
+  // （エリア固有でない直列スクレイプで毎回数秒かかっていたため。エリア情報は下のdiscoverで集める）。
+  const scrape: { ran: boolean; total?: number; results?: unknown } = { ran: false };
 
   let events = await searchEvents(env.DB, {
     area: body.area,
@@ -66,7 +63,7 @@ export async function createPlan(
           interests: body.interests,
           keyword: body.keyword,
           startDate: body.startDate,
-          eventPages: 14, // プランは応答性優先で控えめ（深掘りは「じっくり収集」が担う）
+          eventPages: 6, // プランは応答性優先で控えめ（深掘りは「じっくり収集」が担う）
           onExtractStart: () => report('スポット情報を抽出中…', 50),
         });
       } catch {
@@ -90,8 +87,11 @@ export async function createPlan(
 
   await report(isDayTrip ? '情報を整理しています…' : '情報を整理して宿泊先を検索中…', 68);
   // エリアの中心座標と都道府県を1回求め、ホテルの地域絞り込み・地図の誤ピン防止に使う。
+  // 都道府県は地名から直接解決（ネットワーク不要）→ 取れなければ逆ジオコーディング(1.1秒)に頼る。
   const areaCenter = body.area ? await geocodeQuery(env, body.area) : null;
-  const areaPref = areaCenter ? await reversePrefecture(env, areaCenter.lat, areaCenter.lng) : undefined;
+  const areaPref =
+    (body.area ? prefectureOf(body.area) : undefined) ||
+    (areaCenter ? await reversePrefecture(env, areaCenter.lat, areaCenter.lng) : undefined);
 
   let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
   if (!isDayTrip) {
@@ -129,6 +129,9 @@ export async function createPlan(
     plan.notice =
       'このエリアの詳しい情報を十分に集められませんでした。エリア名をもう少し具体的にすると精度が上がります（例: 「島根」→「出雲市」）。少し時間をおいて再作成すると改善することがあります。';
   }
+
+  // 天気は独立（Open-Meteo）なので先に投げて、ジオコーディング/交通計算と並行で取得する。
+  const forecastP = fetchForecast(body.area ?? '', body.startDate, body.endDate).catch(() => []);
 
   // 地図用に各スポットの実座標を取得（AIの推測座標を上書き。エリア近傍のみ採用）。
   await report('地図の座標を取得中…', 90);
@@ -186,9 +189,9 @@ export async function createPlan(
   }
 
   await report('天気を取得して仕上げ中…', 95);
-  // 旅行日の天気予報（無料・キー不要）。取得できたら付与。
+  // 先に投げておいた天気予報（無料・キー不要）を回収。取得できたら付与。
   try {
-    const forecast = await fetchForecast(body.area ?? '', body.startDate, body.endDate);
+    const forecast = await forecastP;
     if (forecast.length) plan.forecast = forecast;
   } catch {
     /* 天気は任意 */
@@ -206,6 +209,10 @@ export async function createPlan(
     lat: e.lat ?? undefined,
     lng: e.lng ?? undefined,
   }));
+
+  // 候補スポット（メイン以外）は保存プランにも含めて、バックグラウンド完了後の
+  // /plan/:id 取得でも結果下部に一覧表示できるようにする。
+  plan.candidates = candidates;
 
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();

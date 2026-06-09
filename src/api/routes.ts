@@ -45,7 +45,7 @@ import { AI_MODELS } from '../planner/ai';
 import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 import { searchPlaces } from '../data/places';
-import { suggestAreas } from '../planner/suggest';
+import { suggestAreas, suggestConcepts } from '../planner/suggest';
 import { generatePacking } from '../planner/packing';
 
 export const api = new Hono<{ Bindings: Env }>();
@@ -143,6 +143,8 @@ api.get('/diag/hotel', async (c) => {
   };
   // 2) 生の空室検索（指定日・adultNum=2）
   if (kw.hotels.length && checkin && checkout && env.RAKUTEN_APP_ID && env.RAKUTEN_ACCESS_KEY) {
+    // 楽天は1req/秒。キーワード検索直後だと429になるので間隔を空ける。
+    await new Promise((r) => setTimeout(r, 1200));
     const nos = kw.hotels.map((h) => h.hotelNo).filter((n): n is number => typeof n === 'number').slice(0, 5);
     const params = new URLSearchParams({
       applicationId: env.RAKUTEN_APP_ID,
@@ -155,9 +157,18 @@ api.get('/diag/hotel', async (c) => {
     });
     const url = `https://openapi.rakuten.co.jp/engine/api/Travel/VacantHotelSearch/20170426?${params.toString()}`;
     try {
-      const res = await fetch(url, {
-        headers: { 'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)', Accept: 'application/json' },
-      });
+      // 新APIは Referer 必須（無いと 403 REQUEST_CONTEXT_BODY_HTTP_REFERRER_MISSING）。
+      // 実プラン経路と同じく Origin/Referer を付ける。
+      const o = reqOrigin(c.req.url);
+      const vHeaders: Record<string, string> = {
+        'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)',
+        Accept: 'application/json',
+      };
+      if (o) {
+        vHeaders.Origin = o;
+        vHeaders.Referer = o.endsWith('/') ? o : o + '/';
+      }
+      const res = await fetch(url, { headers: vHeaders });
       const text = await res.text();
       let data: any = null;
       try {
@@ -165,13 +176,26 @@ api.get('/diag/hotel', async (c) => {
       } catch {
         /* JSONでない */
       }
+      // 各ホテルの「実際に泊まれる部屋の1泊総額(dailyCharge.total)の最小」を抽出して確認する。
+      const dated = (Array.isArray(data?.hotels) ? data.hotels : []).map((wrap: any) => {
+        const parts: any[] = Array.isArray(wrap.hotel) ? wrap.hotel : [];
+        const info = parts[0]?.hotelBasicInfo;
+        let minTotal: number | undefined;
+        for (const part of parts) {
+          for (const r of part?.roomInfo ?? []) {
+            const t = r?.dailyCharge?.total;
+            if (typeof t === 'number' && t > 0 && (minTotal == null || t < minTotal)) minTotal = t;
+          }
+        }
+        return { name: info?.hotelName, hotelMinCharge: info?.hotelMinCharge ?? null, datedRoomTotal: minTotal ?? null };
+      });
       out.vacant = {
         status: res.status,
         testedNos: nos,
         error: data?.error ? `${data.error}: ${data.error_description ?? ''}`.trim() : undefined,
         hotelCount: Array.isArray(data?.hotels) ? data.hotels.length : 0,
-        sampleCharge: data?.hotels?.[0]?.hotel?.[0]?.hotelBasicInfo?.hotelMinCharge ?? null,
-        raw: text.slice(0, 400),
+        dated, // name / hotelMinCharge(底値) / datedRoomTotal(指定日の実部屋総額)
+        raw: text.slice(0, 1200),
       };
     } catch (e) {
       out.vacant = { error: e instanceof Error ? e.message : String(e) };
@@ -534,8 +558,8 @@ api.post('/packing', async (c) => {
 });
 
 // おまかせモード: 条件（出発地/交通/予算/日数/気分…）から行き先を3案AIが提案する。
-api.post('/suggest-areas', async (c) => {
-  const raw = (await c.req.json<any>().catch(() => null)) || {};
+// おまかせの条件（出発地・日数・気分・人数・時間上限等）を raw から組み立てる共通処理。
+function suggestOptsFromRaw(raw: any) {
   let days: number | undefined;
   if (DATE_RE.test(raw.startDate ?? '') && DATE_RE.test(raw.endDate ?? '')) {
     const s = new Date(`${raw.startDate}T00:00:00Z`).getTime();
@@ -545,7 +569,7 @@ api.post('/suggest-areas', async (c) => {
   } else if (Number.isFinite(Number(raw.days))) {
     days = Math.max(1, Math.min(30, Math.round(Number(raw.days))));
   }
-  const areas = await suggestAreas(c.env, {
+  return {
     origin: str(raw.origin, 80),
     transport: str(raw.transport, 40),
     budget: Number.isFinite(Number(raw.budget)) ? Number(raw.budget) : undefined,
@@ -558,7 +582,21 @@ api.post('/suggest-areas', async (c) => {
     maxHours: Number.isFinite(Number(raw.maxHours)) && Number(raw.maxHours) > 0 ? Number(raw.maxHours) : undefined,
     startDate: DATE_RE.test(raw.startDate ?? '') ? raw.startDate : undefined,
     exclude: strArr(raw.exclude),
-  });
+    concept: str(raw.concept, 60),
+  };
+}
+
+// おまかせ1段目: 「旅の方向性（テーマ）」を提案する（場所ではない）。
+api.post('/suggest-concepts', async (c) => {
+  const raw = (await c.req.json<any>().catch(() => null)) || {};
+  const concepts = await suggestConcepts(c.env, suggestOptsFromRaw(raw));
+  return c.json({ concepts });
+});
+
+// おまかせ2段目: 条件（＋テーマ concept）に合う行き先を提案する。
+api.post('/suggest-areas', async (c) => {
+  const raw = (await c.req.json<any>().catch(() => null)) || {};
+  const areas = await suggestAreas(c.env, suggestOptsFromRaw(raw));
   return c.json({ areas });
 });
 

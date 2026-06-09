@@ -17,9 +17,18 @@ const KEYWORD = {
   ],
   pagingInfo: { pageCount: 1 },
 };
-// VacantHotelSearch（指定日の実価格）
+// VacantHotelSearch（指定日の実価格）。実際に泊まれる部屋の dailyCharge.total を使う。
+// hotelMinCharge(底値3000)ではなく、部屋総額の最小24000(=1室の実価格)になるべき。
 const VACANT = {
-  hotels: [{ hotel: [{ hotelBasicInfo: { hotelNo: 1, hotelMinCharge: 12000 } }] }],
+  hotels: [
+    {
+      hotel: [
+        { hotelBasicInfo: { hotelNo: 1, hotelMinCharge: 3000 } },
+        { roomInfo: [{ roomBasicInfo: { planName: 'ツイン' } }, { dailyCharge: { rakutenCharge: 12000, total: 24000 } }] },
+        { roomInfo: [{ roomBasicInfo: { planName: 'デラックス' } }, { dailyCharge: { total: 30000 } }] },
+      ],
+    },
+  ],
 };
 
 function stubFetch() {
@@ -63,7 +72,7 @@ describe('rakutenHotelSearch 楽天トラベル連携', () => {
       checkoutDate: '2026-06-21',
     });
     const hagi = r.hotels.find((h) => h.name === '萩の宿');
-    expect(hagi?.nightlyPrice).toBe(12000); // 8000(最低料金) → 12000(指定日実価格)
+    expect(hagi?.nightlyPrice).toBe(24000); // 8000(最低料金) → 24000(指定日の1室実価格)
     expect(hagi?.datedPrice).toBe(true);
     expect(r.hotels[0]?.datedPrice).toBe(true); // 指定日価格が先頭
   });

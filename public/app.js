@@ -836,16 +836,87 @@ function setPlanMode(mode) {
   $('tab-auto').classList.toggle('active', mode === 'auto');
   $('area-field').classList.toggle('hidden', mode === 'auto');
   $('auto-note').classList.toggle('hidden', mode !== 'auto');
+  // 移動時間の上限はおまかせ（行き先をAIが選ぶ）時のみ意味があるので、その時だけ表示。
+  const mh = $('maxHours-field');
+  if (mh) mh.classList.toggle('hidden', mode !== 'auto');
   $('suggest-results').classList.add('hidden');
   $('area').required = mode === 'manual';
   $('submit-btn').querySelector('.btn-label').textContent =
-    mode === 'auto' ? '🎲 行き先を提案してもらう' : 'プランを作成する';
+    mode === 'auto' ? '🎲 旅のテーマを提案してもらう' : 'プランを作成する';
 }
 
 function submitPlan(ev) {
   ev.preventDefault();
-  if (planMode === 'auto') suggestAreasFlow();
+  if (planMode === 'auto') suggestConceptsFlow();
   else startPlan();
+}
+
+// おまかせで選択中の「旅のテーマ」（行き先提案とプランの味付けに使う）。
+let selectedConcept = null;
+let lastConcepts = [];
+
+// おまかせ1段目: 「旅の方向性（テーマ）」を提案させてカード表示する。
+async function suggestConceptsFlow(exclude) {
+  const body = buildPlanBody();
+  if (!body.startDate || !body.endDate) {
+    setStatus('日程を入れてください。', 'err');
+    return;
+  }
+  if (exclude && exclude.length) body.exclude = exclude;
+  selectedConcept = null;
+  setBusy(true);
+  $('result').classList.add('hidden');
+  showIndet('AIが旅の方向性を考えています…');
+  setStatus('条件に合う「旅のテーマ」をAIが考えています…', '');
+  try {
+    const r = await api('/suggest-concepts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    hideProgressBar();
+    setBusy(false);
+    const concepts = r.concepts || [];
+    lastConcepts = Array.from(new Set([...(exclude || []), ...concepts.map((c) => c.title)]));
+    renderConcepts(concepts);
+  } catch (e) {
+    hideProgressBar();
+    setBusy(false);
+    setStatus('テーマの提案に失敗しました: ' + e.message, 'err');
+  }
+}
+
+function renderConcepts(concepts) {
+  const box = $('suggest-results');
+  if (!concepts.length) {
+    box.classList.add('hidden');
+    setStatus('提案が得られませんでした。条件を変えて再度お試しください。', 'err');
+    return;
+  }
+  setStatus('気になる方向性を選ぶと、それに合う行き先を提案します。', 'ok');
+  box.innerHTML =
+    `<div class="suggest-h">🎲 どんな旅にする？（方向性を選んでください）</div>` +
+    concepts
+      .map((c, i) => {
+        return `<div class="concept-card" data-i="${i}">
+        <div class="concept-top">${c.emoji ? esc(c.emoji) + ' ' : ''}<span class="concept-title">${esc(c.title)}</span></div>
+        ${c.description ? `<p class="concept-desc">${esc(c.description)}</p>` : ''}
+        <button type="button" class="btn-secondary concept-pick" data-i="${i}">この方向で行き先を見る →</button>
+      </div>`;
+      })
+      .join('') +
+    `<button type="button" id="concept-again" class="btn-secondary suggest-again">🔄 別のテーマを見る</button>`;
+  box.classList.remove('hidden');
+  box.querySelectorAll('.concept-pick').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const c = concepts[Number(btn.dataset.i)];
+      selectedConcept = c ? c.title : null;
+      suggestAreasFlow(); // 選んだテーマに合う行き先へ
+    });
+  });
+  const again = $('concept-again');
+  if (again) again.addEventListener('click', () => suggestConceptsFlow(lastConcepts));
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // 直近に提案された行き先（「再考」で除外して別案を出すために保持）。
@@ -860,9 +931,14 @@ async function suggestAreasFlow(exclude) {
     return;
   }
   if (exclude && exclude.length) body.exclude = exclude;
+  if (selectedConcept) body.concept = selectedConcept; // 選んだテーマに合う行き先を出す
   setBusy(true);
+  $('result').classList.add('hidden'); // 行き先を選び直すので前回プランは画面に残さない
   showIndet(exclude && exclude.length ? 'AIが別の行き先を考えています…' : 'AIが行き先を考えています…');
-  setStatus('条件に合う行き先をAIが3案考えています…', '');
+  setStatus(
+    selectedConcept ? `「${selectedConcept}」に合う行き先をAIが考えています…` : '条件に合う行き先をAIが3案考えています…',
+    '',
+  );
   try {
     const r = await api('/suggest-areas', {
       method: 'POST',
@@ -890,8 +966,14 @@ function renderSuggestions(areas) {
     return;
   }
   setStatus('行き先を選ぶと、その地でプランを作成します。', 'ok');
+  const heading = selectedConcept
+    ? `🎲 「${esc(selectedConcept)}」に合う行き先（${areas.length}案）`
+    : `🎲 AIのおすすめ行き先（${areas.length}案）`;
+  const backBtn = selectedConcept
+    ? `<button type="button" id="concept-back" class="btn-ghost suggest-again">← テーマを選び直す</button>`
+    : '';
   box.innerHTML =
-    `<div class="suggest-h">🎲 AIのおすすめ行き先（${areas.length}案）</div>` +
+    `<div class="suggest-h">${heading}</div>` +
     areas
       .map((a, i) => {
         const hl = (a.highlights || []).map((h) => `<span class="tag">${esc(h)}</span>`).join('');
@@ -905,7 +987,8 @@ function renderSuggestions(areas) {
       </div>`;
       })
       .join('') +
-    `<button type="button" id="suggest-again" class="btn-secondary suggest-again">🔄 別の案を再考する</button>`;
+    `<button type="button" id="suggest-again" class="btn-secondary suggest-again">🔄 別の案を再考する</button>` +
+    backBtn;
   box.classList.remove('hidden');
   box.querySelectorAll('.suggest-pick').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -913,14 +996,19 @@ function renderSuggestions(areas) {
       const area = card ? card.getAttribute('data-area') : '';
       if (!area) return;
       $('area').value = area;
+      // 選んだテーマをプランの味付けに反映する（1回限りの追加リクエストとして渡す）。
+      if (selectedConcept) pendingRefine = `旅のテーマ「${selectedConcept}」に沿った雰囲気・過ごし方にしてください`;
       setPlanMode('manual'); // 行き先が決まったので通常モードへ
       box.classList.add('hidden');
       startPlan();
     });
   });
-  // 再考: これまで提案された行き先を除外して別案を出す。
+  // 再考: これまで提案された行き先を除外して別案を出す（テーマは維持）。
   const again = $('suggest-again');
   if (again) again.addEventListener('click', () => suggestAreasFlow(lastSuggested));
+  // テーマを選び直す: 1段目（テーマ提案）に戻る。
+  const back = $('concept-back');
+  if (back) back.addEventListener('click', () => suggestConceptsFlow());
   // プラン作成ボタンの下に出るので、提案までスクロールして見せる。
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -979,6 +1067,8 @@ async function startPlan() {
   if (!validateForm()) return;
   setBusy(true);
   $('recollect-btn').classList.add('hidden'); // 再収集ボタンが残らないよう隠す
+  // 再作成中は前回のプランを画面に残さない（古い結果が見えたままにしない）。
+  $('result').classList.add('hidden');
   // 新規作成中は前回プランの保存/共有/印刷/調整ボタンを隠す（完成後に出し直す）。
   $('save-btn').classList.add('hidden');
   $('share-btn').classList.add('hidden');
@@ -1238,7 +1328,8 @@ function renderPlan(data) {
   wireHotelSelection();
 
   renderPlanDays();
-  renderCandidates(data.candidates);
+  // 候補は同期作成時は data.candidates、保存プラン取得時は plan に内包される。
+  renderCandidates(data.candidates || (data.plan && data.plan.candidates));
 
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1742,7 +1833,7 @@ function renderCostCard() {
 
 function renderCost(c) {
   // 日帰り（0泊）は宿泊費の行を出さない。
-  const hotelLabel = `ホテル${c.nights ? `（${c.nights}泊）` : ''}${c.hotelName ? `・${esc(c.hotelName)}` : ''}`;
+  const hotelLabel = `ホテル${c.nights ? `（${c.nights}泊・1室）` : ''}${c.hotelName ? `・${esc(c.hotelName)}` : ''}`;
   const hotelVal = c.hotelUnknown ? '料金不明' : yen(c.hotel);
   const hotelRow = c.nights ? `<div class="cost-row"><span>${hotelLabel}</span><span>${hotelVal}</span></div>` : '';
   const rows =
@@ -1778,7 +1869,7 @@ function renderHotels(hotels) {
       const link = h.url
         ? `<a class="hotel-link" href="${esc(h.url)}" target="_blank" rel="noopener">楽天トラベルで見る →</a>`
         : `<a class="hotel-link" href="https://www.google.com/search?q=${encodeURIComponent(h.name + ' 宿泊 予約')}" target="_blank" rel="noopener">空室・料金を探す →</a>`;
-      const priceLabel = h.datedPrice ? '/ 泊・人〜（指定日）' : '/ 泊・人〜';
+      const priceLabel = h.datedPrice ? '/ 泊・室〜（指定日）' : '/ 泊〜（最低料金）';
       const checked = idx === selectedHotelIdx ? ' checked' : '';
       const extra = idx >= HOTELS_SHOWN ? ' hotel-extra hidden' : '';
       return `<div class="hotel${checked ? ' selected' : ''}${extra}" data-hotel="${idx}">
@@ -2046,13 +2137,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('save-btn').addEventListener('click', saveCurrentPlan);
   $('print-btn').addEventListener('click', () => window.print());
   $('wish-plan-btn').addEventListener('click', genFromWishlist);
-  $('refine-btn').addEventListener('click', () => {
+  $('refine-btn').addEventListener('click', async () => {
     const v = $('refine-input').value.trim();
     if (!v) {
       setStatus('変えたい内容を入力してください（例：グルメ多めに）。', 'err');
       $('refine-input').focus();
       return;
     }
+    const ok = await uiConfirm(`「${v}」でプランを作り直します。今表示中のプランは置き換わります。`, {
+      title: 'この内容で作り直す',
+      okText: '作り直す',
+      cancelText: 'やめる',
+    });
+    if (!ok) return;
     refinePlan(v);
   });
   $('variant-btn').addEventListener('click', () =>
