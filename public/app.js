@@ -836,6 +836,9 @@ function setPlanMode(mode) {
   $('tab-auto').classList.toggle('active', mode === 'auto');
   $('area-field').classList.toggle('hidden', mode === 'auto');
   $('auto-note').classList.toggle('hidden', mode !== 'auto');
+  // 移動時間の上限はおまかせ（行き先をAIが選ぶ）時のみ意味があるので、その時だけ表示。
+  const mh = $('maxHours-field');
+  if (mh) mh.classList.toggle('hidden', mode !== 'auto');
   $('suggest-results').classList.add('hidden');
   $('area').required = mode === 'manual';
   $('submit-btn').querySelector('.btn-label').textContent =
