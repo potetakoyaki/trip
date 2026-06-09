@@ -438,6 +438,7 @@ export async function diagCollectEventSites(env: Env, area: string, month?: numb
     area,
     prefecture,
     source, // seed(内蔵) / cache(DB) / search(検索)。Jina非依存かどうかが分かる。
+    hasJinaKey: !!env.JINA_API_KEY, // アプリ(Worker)がJinaキーを認識しているか
     month,
     queries,
     eventSiteUrls: base,
