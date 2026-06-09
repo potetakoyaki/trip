@@ -187,8 +187,8 @@ select:focus {
 
 /* interest chips */
 .chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 9px;
 }
 .chip {
@@ -196,12 +196,14 @@ select:focus {
   border: 1.5px solid var(--line);
   background: #fff;
   border-radius: 999px;
-  padding: 9px 16px;
+  padding: 9px 10px;
   cursor: pointer;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--ink-soft);
   user-select: none;
+  text-align: center;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 .chip:hover {

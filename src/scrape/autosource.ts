@@ -1,6 +1,7 @@
 import type { Env, NormalizedEvent } from '../types';
 import { HttpClient } from './http';
 import { extractReadableText } from './readable';
+import { extractJsonLdScripts, parseJsonLdEvents } from './jsonld';
 import { extractSpots } from './ai-extract';
 import { upsertEvents } from '../db/repository';
 import { inferCategory, inferPrefecture } from '../util/normalize';
@@ -53,6 +54,7 @@ export async function discoverAndScrape(
   const offset = Math.max(0, opts.resultOffset ?? 0); // 再収集の深さ
 
   const docs: { source: string; url: string; text: string }[] = [];
+  const jsonldEvents: NormalizedEvent[] = []; // schema.orgのEvent（正確な開催日つき）
   let engine: string | null = null;
   let candidates = 0;
 
@@ -92,8 +94,9 @@ export async function discoverAndScrape(
       const h = hostOf(url);
       if (!h || isExcludedHost(h) || seenHost.has(h)) continue;
       seenHost.add(h);
-      const text = await readPage(http, env, url);
-      if (text.length > 300) docs.push({ source: `web:${h}`, url, text });
+      const page = await readPage(http, env, url);
+      if (page.text.length > 300) docs.push({ source: `web:${h}`, url, text: page.text });
+      if (page.events.length) jsonldEvents.push(...page.events);
     }
   }
 
@@ -141,6 +144,10 @@ export async function discoverAndScrape(
   let total = 0;
   for (const { source, events } of perDoc) {
     if (events.length) total += await upsertEvents(env.DB, source, events, scrapedAt);
+  }
+  // JSON-LD（schema.org）から拾った正確な開催日つきイベントも保存。
+  if (jsonldEvents.length) {
+    total += await upsertEvents(env.DB, 'jsonld', jsonldEvents, scrapedAt);
   }
 
   return {
@@ -205,22 +212,59 @@ async function jinaSearch(
   }
 }
 
-/** ページ本文取得: Jina Reader(r.jina.ai)優先（botブロック回避）→ 直接取得。 */
-async function readPage(http: HttpClient, env: Env, url: string): Promise<string> {
-  try {
+/**
+ * ページ本文取得＋JSON-LDイベント抽出。
+ * - JINA_API_KEYがあれば Jina Reader 優先（botブロック回避）。
+ * - 無ければ「直接取得」を優先（無料Jinaは枠切れしやすいため）。
+ * 直接取得できたときは HTML から schema.org の Event/観光スポット（正確な開催日つき）も拾う。
+ */
+async function readPage(http: HttpClient, env: Env, url: string): Promise<{ text: string; events: NormalizedEvent[] }> {
+  const hasKey = !!env.JINA_API_KEY;
+  const tryJina = async (): Promise<string> => {
     const headers: Record<string, string> = {};
     if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
     const md = await http.getText(`https://r.jina.ai/${url}`, { skipRobots: true, headers });
-    if (md && md.length > 300) return md;
+    return md && md.length > 300 ? md : '';
+  };
+  const tryDirect = async (): Promise<{ text: string; events: NormalizedEvent[] }> => {
+    const html = await http.getText(url, { skipRobots: true });
+    let events: NormalizedEvent[] = [];
+    try {
+      const scripts = await extractJsonLdScripts(html);
+      if (scripts.length) events = parseJsonLdEvents(scripts);
+    } catch {
+      /* JSON-LD抽出失敗は無視 */
+    }
+    return { text: extractReadableText(html), events };
+  };
+
+  if (hasKey) {
+    try {
+      const md = await tryJina();
+      if (md) return { text: md, events: [] };
+    } catch {
+      /* 直接へ */
+    }
+    try {
+      return await tryDirect();
+    } catch {
+      return { text: '', events: [] };
+    }
+  }
+  // キー無し: 直接取得を優先（Jina枠切れ対策）→ ダメなら Jina Reader
+  try {
+    const d = await tryDirect();
+    if (d.text.length > 300 || d.events.length) return d;
   } catch {
-    /* 直接取得にフォールバック */
+    /* Jinaへ */
   }
   try {
-    const html = await http.getText(url, { skipRobots: true });
-    return extractReadableText(html);
+    const md = await tryJina();
+    if (md) return { text: md, events: [] };
   } catch {
-    return '';
+    /* 諦め */
   }
+  return { text: '', events: [] };
 }
 
 /** Brave API（キーがあれば）→ Bing → DuckDuckGo の順でURL候補を得る。 */
