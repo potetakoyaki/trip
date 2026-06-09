@@ -17,6 +17,9 @@ export interface DiscoverResult {
 // 無料枠の節約のため控えめにする（じっくり収集は別途ラウンドで追加収集できる）。
 const MAX_PAGES = 6;
 
+// イベントらしいページの手がかり（JSON-LD補完の対象を絞る）。
+const EVENT_HINT = /祭り|まつり|花火|フェス|イベント|開催|ライトアップ|マルシェ|展|ナイト/;
+
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -96,7 +99,8 @@ export async function discoverAndScrape(
       seenHost.add(h);
       const page = await readPage(http, env, url);
       if (page.text.length > 300) docs.push({ source: `web:${h}`, url, text: page.text });
-      if (page.events.length) jsonldEvents.push(...page.events);
+      // city が空のイベントもこのエリアの収集なので area を既定にして、確実に検索でヒットさせる。
+      for (const ev of page.events) jsonldEvents.push({ ...ev, city: ev.city || area });
     }
   }
 
@@ -134,6 +138,20 @@ export async function discoverAndScrape(
           endAt: isoDate(s.endDate),
           raw: { from: doc.source, area },
         });
+      }
+      // Jina経路は本文（整形済みテキスト）しか得られず、JSON-LD（schema.orgの
+      // 正確な開催日つきEvent）が取れない。イベントらしいページに限り生HTMLを直接
+      // 取得して JSON-LD を補完する（祭り・花火等の開催日を正確に拾うため。件数は
+      // 控えめ・失敗は無視で、速度への影響を最小化）。
+      if (engine === 'jina' && EVENT_HINT.test(doc.text)) {
+        try {
+          const html = await http.getText(doc.url, { skipRobots: true });
+          const scripts = await extractJsonLdScripts(html);
+          // city が空のイベントもこのエリアの収集なので area を既定に（title頼みの検索を避ける）。
+          for (const ev of parseJsonLdEvents(scripts)) events.push({ ...ev, city: ev.city || area });
+        } catch {
+          /* JSON-LD補完の失敗は無視（本文抽出のイベントで代替） */
+        }
       }
       return { source: doc.source, events };
     } catch {

@@ -1220,7 +1220,7 @@ function renderPlan(data) {
 function renderPlanDays() {
   if (!currentPlan) return;
   const daysEl = $('plan-days');
-  daysEl.innerHTML = currentPlan.days
+  daysEl.innerHTML = (currentPlan.days || [])
     .map((day, i) => `<div class="day" data-day="${i}">${renderDayInner(day, i)}</div>`)
     .join('');
   renderEval();
@@ -1239,7 +1239,7 @@ function renderMap() {
     return;
   }
   const allPts = [];
-  currentPlan.days.forEach((day) => {
+  (currentPlan.days || []).forEach((day) => {
     (day.items || []).forEach((it) => {
       if (it.lat != null && it.lng != null) allPts.push([it.lat, it.lng]);
     });
@@ -1291,14 +1291,15 @@ function renderDayInner(day, i) {
   const d = new Date(day.date + 'T00:00:00');
   const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
   const dayTheme = day.theme ? `<div class="day-theme">${esc(day.theme)}</div>` : '';
-  const route = dayRouteLink(day.items);
+  const items = day.items || [];
+  const route = dayRouteLink(items);
   let body;
-  if (day.items.length) {
-    const sched = computeSchedule(day.items, currentTransport);
-    body = day.items
+  if (items.length) {
+    const sched = computeSchedule(items, currentTransport);
+    body = items
       .map((it, idx) => {
-        const item = renderItem(it, i, idx, day.items.length, sched.times[idx]);
-        const connector = idx < day.items.length - 1 ? renderConnector(sched.legs[idx]) : '';
+        const item = renderItem(it, i, idx, items.length, sched.times[idx]);
+        const connector = idx < items.length - 1 ? renderConnector(sched.legs[idx]) : '';
         return item + connector;
       })
       .join('');
@@ -1822,7 +1823,7 @@ function renderForecast(fc) {
       const pop = day.pop != null ? `☔${day.pop}%` : '';
       return `<div class="fc-day">
         <div class="fc-date">${md}</div>
-        <div class="fc-emoji">${day.emoji}</div>
+        <div class="fc-emoji">${esc(day.emoji)}</div>
         <div class="fc-label">${esc(day.label)}</div>
         <div class="fc-temp">${temp}</div>
         <div class="fc-pop">${pop}</div>
@@ -1921,10 +1922,11 @@ function renderItem(it, dayIndex, idx, count, clock) {
     `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>`,
     `<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式サイト</a>`,
   ];
-  // 口コミ：グルメは食べログ、それ以外はGoogleの「口コミ・評判」検索。
+  // 口コミ：グルメは食べログ（フリーワード検索＋地名で絞り）、それ以外はGoogleの「口コミ・評判」検索。
   const cat = it.category || '';
+  const kw = `${it.title} ${it.location || ''}`.trim();
   if (cat.includes('グルメ') || cat.includes('食') || cat.includes('レストラン') || cat.includes('カフェ')) {
-    links.push(`<a href="https://tabelog.com/rstLst/?sw=${encodeURIComponent(it.title)}" target="_blank" rel="noopener">⭐ 口コミ</a>`);
+    links.push(`<a href="https://tabelog.com/rst/rstsearch/?sw=${encodeURIComponent(kw)}" target="_blank" rel="noopener">⭐ 口コミ</a>`);
   } else {
     links.push(`<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 口コミ 評判')}" target="_blank" rel="noopener">⭐ 口コミ</a>`);
   }
@@ -2101,7 +2103,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;
-    if (s) $('endDate').value = addDays(s, 1);
+    const e = $('endDate').value;
+    // 終了日が未設定 or 開始日より前のときだけ自動補完（既存の複数日設定を壊さない）。
+    if (s && (!e || e < s)) $('endDate').value = addDays(s, 1);
   });
 
   loadHistory();

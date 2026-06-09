@@ -554,9 +554,13 @@ api.get('/places', async (c) => {
   if (q.length >= 2) {
     try {
       const url = `https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`;
+      // GSIが遅いと毎キーストロークの補完がそのぶん待たされるため、短いタイムアウトで打ち切る。
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 2500);
       const res = await fetch(url, {
         headers: { 'User-Agent': c.env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)', Accept: 'application/json' },
-      });
+        signal: ac.signal,
+      }).finally(() => clearTimeout(timer));
       if (res.ok) {
         const arr = (await res.json()) as Array<{ properties?: { title?: string } }>;
         if (Array.isArray(arr)) {

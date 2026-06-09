@@ -4,6 +4,7 @@ import {
   ensureJobsTable,
   getJob,
   takeNextPendingJob,
+  claimJobRound,
   updateJobProgress,
   searchEvents,
 } from '../db/repository';
@@ -15,7 +16,10 @@ import {
 export async function processOneRound(env: Env, area: string): Promise<void> {
   await ensureJobsTable(env.DB);
   const job = await getJob(env.DB, area);
-  if (!job || job.status !== 'pending') return;
+  if (!job || (job.status !== 'pending' && job.status !== 'running')) return;
+  // waitUntil と毎分Cronが同じジョブを同時に処理して二重スクレイプ（無料枠の無駄）に
+  // ならないよう、ここで排他取得する。取れなかった呼び出しは即終了。
+  if (!(await claimJobRound(env.DB, area, new Date().toISOString()))) return;
 
   const { queries, totalRounds } = roundQueries(area, job.round, job.keyword ?? undefined);
   try {

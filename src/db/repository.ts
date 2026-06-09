@@ -150,11 +150,33 @@ export async function getJob(db: D1Database, area: string): Promise<CollectJob |
   return r ?? null;
 }
 
+const ROUND_STALE_MS = 120000; // この時間 running のまま更新が無ければ「落ちた」とみなし再取得可。
+
 export async function takeNextPendingJob(db: D1Database): Promise<CollectJob | null> {
+  // 保留中に加え、running のまま停止した（落ちた）ジョブも再取得対象にする。
+  const staleBefore = new Date(Date.now() - ROUND_STALE_MS).toISOString();
   const r = await db
-    .prepare("SELECT * FROM collect_jobs WHERE status = 'pending' ORDER BY updated_at ASC LIMIT 1")
+    .prepare(
+      "SELECT * FROM collect_jobs WHERE status='pending' OR (status='running' AND updated_at < ?) ORDER BY updated_at ASC LIMIT 1",
+    )
+    .bind(staleBefore)
     .first<CollectJob>();
   return r ?? null;
+}
+
+/**
+ * 1ラウンド処理の排他取得。pending か「落ちた running」を running に切り替え、
+ * 1件でも更新できた呼び出しだけ true（勝者）。waitUntil と Cron の二重実行を防ぐ。
+ */
+export async function claimJobRound(db: D1Database, area: string, now: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - ROUND_STALE_MS).toISOString();
+  const res = await db
+    .prepare(
+      "UPDATE collect_jobs SET status='running', updated_at=? WHERE area=? AND (status='pending' OR (status='running' AND updated_at < ?))",
+    )
+    .bind(now, area, staleBefore)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
 export async function updateJobProgress(
@@ -168,10 +190,12 @@ export async function updateJobProgress(
     .run();
 }
 
-/** じっくり収集をキャンセル（保留中のみ）。以降のラウンドは実行されない。 */
+/** じっくり収集をキャンセル（保留中・実行中）。以降のラウンドは実行されない。 */
 export async function cancelCollectJob(db: D1Database, area: string, now: string): Promise<boolean> {
   const res = await db
-    .prepare("UPDATE collect_jobs SET status='cancelled', updated_at=? WHERE area=? AND status='pending'")
+    .prepare(
+      "UPDATE collect_jobs SET status='cancelled', updated_at=? WHERE area=? AND (status='pending' OR status='running')",
+    )
     .bind(now, area)
     .run();
   return (res.meta?.changes ?? 0) > 0;

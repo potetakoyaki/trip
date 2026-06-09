@@ -145,6 +145,8 @@ export async function generateAiPlan(
     .filter((t) => !have.has(t))
     .map((title) => ({ title, category: undefined, area: req.area, price: undefined, desc: '行きたいスポット（必ず含める）' }));
   const candidates = [...mustCands, ...baseCands];
+  // 「行きたい」スポット名の集合（1日あたりの件数上限で取りこぼさないため）。
+  const mustSet = new Set(mustInclude);
 
   const sys =
     'あなたは経験豊富な旅行コンシェルジュです。観光スポットは与えられた候補から選びます。ただし飲食店・カフェ、ホテル、移動・費用の目安は一般知識で補ってよいです。魅力的で現実的な旅行プランをJSONで作成し、各項目は具体的で実用的に書きます。費用はすべて1人あたりの円の目安です。';
@@ -242,9 +244,23 @@ export async function generateAiPlan(
     try {
       const text = await geminiGenerate(env, sys, user, { maxOutputTokens: 4096 });
       res = { response: text };
-    } catch {
-      // Gemini が失敗したら Workers AI にフォールバック（枠切れなら AiQuotaError）。
-      res = await runWorkersAI();
+    } catch (ge) {
+      if (env.AI) {
+        // Workers AI にフォールバック（枠切れなら AiQuotaError）。
+        res = await runWorkersAI();
+      } else {
+        // Gemini 単独構成（Workers AI 無し）はフォールバック先が無い。
+        // ここで runWorkersAI() を呼ぶと「Workers AIが無効です」という的外れなエラーで
+        // プラン作成が丸ごと失敗する。代わりに収集済みスポットから簡易プランを返し、
+        // 失敗の種別に応じた正直な notice を添える（全滅させない）。
+        const plan = generateRulePlan(events, req);
+        const kind = classifyAiError(ge);
+        plan.notice =
+          kind === 'busy'
+            ? 'AI（Gemini）が混雑していたため、収集済みスポットから簡易プランを作成しました。少し時間をおいて再作成すると、AIによる詳しい提案になります。'
+            : 'AIでのプラン生成に失敗したため、収集済みスポットから簡易プランを作成しました。時間をおいて再度お試しください。';
+        return plan;
+      }
     }
   } else {
     res = await runWorkersAI();
@@ -260,8 +276,19 @@ export async function generateAiPlan(
     const days: PlanDay[] = dates.map((date, i) => {
       const aiDay = parsed.days[i] ?? {};
       const rawItems: any[] = Array.isArray(aiDay.items) ? aiDay.items : [];
+      // 1日あたりの件数上限で切るが、「行きたい」スポットとこの日の開催イベントは
+      // 上限を超えても必ず残す（ユーザーが明示した項目・日付固定の祭り等を取りこぼさない）。
+      const isPriority = (it: any): boolean => {
+        const t = String(it?.title ?? '').trim();
+        if (!t) return false;
+        if (mustSet.has(t) || [...mustSet].some((m) => t.includes(m) || m.includes(t))) return true;
+        const rec = matchRecord(byTitle, t);
+        return !!(rec?.start_at && String(rec.start_at).slice(0, 10) === date);
+      };
+      const capped = rawItems.slice(0, perDay + 1);
+      const extras = rawItems.slice(perDay + 1).filter(isPriority);
       const items: PlanItem[] = [];
-      for (const it of rawItems.slice(0, perDay + 1)) {
+      for (const it of [...capped, ...extras]) {
         const title = String(it?.title ?? '').trim();
         if (!title || used.has(title)) continue;
         used.add(title);
