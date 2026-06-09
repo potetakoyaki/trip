@@ -8,13 +8,44 @@ import { inferCategory, inferPrefecture } from '../util/normalize';
 import { prefectureOf } from '../data/places';
 
 /**
- * 検証済みのウォーカープラス リストURL（都道府県→直URL）。検索(Jina)に頼らず直接取得できる。
- * ※ /api/diag/events の実データで確認できたものだけを載せる（憶測のコードは入れない）。
- *   ar0832 = 島根県（実データで確認済み）。他県は発見時にDBへ自動キャッシュされる。
+ * Walker Plus のエリアコード = "ar" + 地方番号(2桁) + JISコード(2桁)。
+ * 実データで確認: 東京 ar0313 / 神奈川 ar0314 / 島根 ar0832 / 香川 ar0937。
+ * 中部(04-07)は最善推定だが、組み立てたURLは「実在確認(イベントが取れるか)」してから使うので、
+ * 推定が外れた県は検索にフォールバックする（誤URLで取りこぼさない）。
  */
-const KNOWN_WALKERPLUS: Record<string, string[]> = {
-  島根県: ['https://www.walkerplus.com/event_list/ar0832/', 'https://hanabi.walkerplus.com/list/ar0832/'],
+const PREF_REGION: Record<string, number> = {
+  北海道: 1,
+  青森県: 2, 岩手県: 2, 宮城県: 2, 秋田県: 2, 山形県: 2, 福島県: 2,
+  茨城県: 3, 栃木県: 3, 群馬県: 3, 埼玉県: 3, 千葉県: 3, 東京都: 3, 神奈川県: 3,
+  新潟県: 4, 山梨県: 4, 長野県: 4,
+  富山県: 5, 石川県: 5, 福井県: 5,
+  岐阜県: 6, 静岡県: 6, 愛知県: 6, 三重県: 6,
+  滋賀県: 7, 京都府: 7, 大阪府: 7, 兵庫県: 7, 奈良県: 7, 和歌山県: 7,
+  鳥取県: 8, 島根県: 8, 岡山県: 8, 広島県: 8, 山口県: 8,
+  徳島県: 9, 香川県: 9, 愛媛県: 9, 高知県: 9,
+  福岡県: 10, 佐賀県: 10, 長崎県: 10, 熊本県: 10, 大分県: 10, 宮崎県: 10, 鹿児島県: 10, 沖縄県: 10,
 };
+// JIS順（=都道府県コード順）。配列インデックス+1 が JIS コード。
+const PREF_JIS_ORDER = [
+  '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県',
+  '埼玉県', '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県',
+  '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県',
+  '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県',
+  '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+];
+
+/** 都道府県名 → Walker Plus エリアコード（ar+地方2桁+JIS2桁）。不明なら null。 */
+export function walkerplusArCode(prefecture: string): string | null {
+  const region = PREF_REGION[prefecture];
+  const jis = PREF_JIS_ORDER.indexOf(prefecture) + 1;
+  if (!region || jis <= 0) return null;
+  return `ar${String(region).padStart(2, '0')}${String(jis).padStart(2, '0')}`;
+}
+
+/** Walker Plus の ar コードから、収集に使うリストURL（一般＋花火）を組み立てる。 */
+function walkerplusUrlsForCode(code: string): string[] {
+  return [`https://www.walkerplus.com/event_list/${code}/`, `https://hanabi.walkerplus.com/list/${code}/`];
+}
 
 export interface DiscoverResult {
   total: number;
@@ -292,9 +323,25 @@ export function findWalkerplusArCode(html: string, prefecture: string): string |
   return null;
 }
 
-/** Walker Plus の ar コードから、収集に使うリストURL（一般＋花火）を組み立てる。 */
-function walkerplusUrlsForCode(code: string): string[] {
-  return [`https://www.walkerplus.com/event_list/${code}/`, `https://hanabi.walkerplus.com/list/${code}/`];
+/**
+ * 都道府県名から Walker Plus のリストURLを「組み立てて、実在確認してから」返す。
+ * ar+地方+JIS のコードで event_list ページを引き、実際にイベントが取れた時だけ採用する。
+ * 地方番号の推定が外れた県は空を返し、上位で index/検索 にフォールバックする（誤URL回避）。
+ * 検索(Jina)非依存なので枯渇していても全県で機能しうる。
+ */
+async function constructWalkerplusUrls(http: HttpClient, env: Env, prefecture: string): Promise<string[]> {
+  const code = walkerplusArCode(prefecture);
+  if (!code) return [];
+  const listUrl = `https://www.walkerplus.com/event_list/${code}/`;
+  const { html } = await fetchEventHtml(http, env, listUrl);
+  if (!html) return [];
+  try {
+    const events = parseJsonLdEvents(await extractJsonLdScripts(html));
+    if (events.length) return walkerplusUrlsForCode(code);
+  } catch {
+    /* 解析失敗＝このコードは無効 */
+  }
+  return [];
 }
 
 /**
@@ -332,22 +379,26 @@ async function discoverWalkerplusFromIndex(http: HttpClient, env: Env, prefectur
 
 /**
  * イベントサイトのリストURLを決める（Jina非依存を最優先）。
- * 1) 既知（検証済み・内蔵）→ 2) DBキャッシュ → 3) Walker Plus 全国インデックスから直接発見
- * → 4) 検索で発見（Jina等・最後の手段）。1〜3 は検索不要でレート制限に強い。発見したら県毎にキャッシュ。
+ * 1) DBキャッシュ → 2) ar コードを組み立てて実在確認 → 3) 全国インデックスから発見
+ * → 4) 検索（Jina等・最後の手段）。1〜3 は検索不要でレート制限に強い。確定したら県毎にキャッシュ。
  */
 async function resolveEventSiteUrls(
   http: HttpClient,
   env: Env,
   area: string,
   month?: number,
-): Promise<{ urls: string[]; prefecture?: string; source: 'seed' | 'cache' | 'index' | 'search' }> {
+): Promise<{ urls: string[]; prefecture?: string; source: 'cache' | 'arcode' | 'index' | 'search' }> {
   const pref = prefectureOf(area);
-  if (pref && KNOWN_WALKERPLUS[pref]) return { urls: KNOWN_WALKERPLUS[pref], prefecture: pref, source: 'seed' };
   if (pref) {
     const cached = await getEventSourceUrls(env.DB, pref).catch(() => [] as string[]);
     if (cached.length) return { urls: cached, prefecture: pref, source: 'cache' };
-  }
-  if (pref) {
+
+    const built = await constructWalkerplusUrls(http, env, pref).catch(() => [] as string[]);
+    if (built.length) {
+      await putEventSourceUrls(env.DB, pref, built).catch(() => {});
+      return { urls: built, prefecture: pref, source: 'arcode' };
+    }
+
     const idx = await discoverWalkerplusFromIndex(http, env, pref).catch(() => [] as string[]);
     if (idx.length) {
       await putEventSourceUrls(env.DB, pref, idx).catch(() => {});
@@ -501,7 +552,7 @@ export async function diagCollectEventSites(env: Env, area: string, month?: numb
   return {
     area,
     prefecture,
-    source, // seed(内蔵) / cache(DB) / search(検索)。Jina非依存かどうかが分かる。
+    source, // cache(DB) / arcode(コード組立) / index(全国索引) / search(検索)。Jina非依存かが分かる。
     hasJinaKey: !!env.JINA_API_KEY, // アプリ(Worker)がJinaキーを認識しているか
     month,
     queries,

@@ -5,8 +5,25 @@ import {
   isPastEventDate,
   pageUrlFor,
   findWalkerplusArCode,
+  walkerplusArCode,
 } from '../src/scrape/autosource';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
+
+describe('walkerplusArCode: 県→ar コード組み立て（ar+地方2桁+JIS2桁）', () => {
+  it('実データで確認済みの県コードを正しく組み立てる', () => {
+    expect(walkerplusArCode('東京都')).toBe('ar0313');
+    expect(walkerplusArCode('神奈川県')).toBe('ar0314');
+    expect(walkerplusArCode('島根県')).toBe('ar0832');
+    expect(walkerplusArCode('香川県')).toBe('ar0937');
+  });
+  it('北海道・沖縄も組み立てる', () => {
+    expect(walkerplusArCode('北海道')).toBe('ar0101');
+    expect(walkerplusArCode('沖縄県')).toBe('ar1047');
+  });
+  it('不明な県名は null', () => {
+    expect(walkerplusArCode('架空県')).toBeNull();
+  });
+});
 
 describe('isEventSiteHost: イベント情報サイトの判定', () => {
   it('ウォーカープラス（サブドメイン含む）を認識する', () => {
