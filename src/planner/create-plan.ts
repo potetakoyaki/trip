@@ -210,6 +210,10 @@ export async function createPlan(
     lng: e.lng ?? undefined,
   }));
 
+  // 候補スポット（メイン以外）は保存プランにも含めて、バックグラウンド完了後の
+  // /plan/:id 取得でも結果下部に一覧表示できるようにする。
+  plan.candidates = candidates;
+
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   await savePlan(env.DB, id, createdAt, body, plan);

@@ -1241,7 +1241,8 @@ function renderPlan(data) {
   wireHotelSelection();
 
   renderPlanDays();
-  renderCandidates(data.candidates);
+  // 候補は同期作成時は data.candidates、保存プラン取得時は plan に内包される。
+  renderCandidates(data.candidates || (data.plan && data.plan.candidates));
 
   $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
