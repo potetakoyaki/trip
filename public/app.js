@@ -454,6 +454,7 @@ async function loadSharedPlan(id) {
     renderPlan({ plan: d.result });
     $('share-btn').classList.remove('hidden');
     $('print-btn').classList.remove('hidden');
+    $('packing-btn').classList.remove('hidden');
     $('refine-box').classList.remove('hidden');
     setSaveButton(d.saved !== false);
     setStatus('保存されたプランを表示中。条件を変えて作り直せます。', 'ok');
@@ -897,6 +898,55 @@ function renderSuggestions(areas) {
   });
 }
 
+// 🎒 持ち物リスト: 現在のプラン条件（行き先・日付・天気・予定）からAIに作らせる。
+async function genPacking() {
+  if (!currentPlan) return;
+  const acts = (currentPlan.days || []).flatMap((d) => (d.items || []).map((it) => it.title)).slice(0, 16);
+  const body = {
+    area: $('area').value.trim() || currentArea || undefined,
+    startDate: $('startDate').value,
+    endDate: $('endDate').value,
+    weather: $('weather').value,
+    companions: $('companions').value || undefined,
+    adults: $('adults') ? Number($('adults').value) : undefined,
+    activities: acts,
+  };
+  const box = $('packing-box');
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="info-card"><div class="info-h">🎒 持ち物リスト</div><p class="info-note">AIが作成中…</p></div>';
+  $('packing-btn').disabled = true;
+  try {
+    const r = await api('/packing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    renderPacking(r.groups || []);
+  } catch (e) {
+    box.innerHTML = `<div class="info-card"><div class="info-h">🎒 持ち物リスト</div><p class="info-note">作成に失敗しました: ${esc(e.message)}</p></div>`;
+  } finally {
+    $('packing-btn').disabled = false;
+  }
+}
+
+function renderPacking(groups) {
+  const box = $('packing-box');
+  if (!groups.length) {
+    box.innerHTML =
+      '<div class="info-card"><div class="info-h">🎒 持ち物リスト</div><p class="info-note">うまく生成できませんでした。もう一度お試しください。</p></div>';
+    return;
+  }
+  const list = groups
+    .map(
+      (g) =>
+        `<div class="pack-group"><div class="pack-title">${esc(g.title)}</div>${(g.items || [])
+          .map((it) => `<label class="pack-item"><input type="checkbox" /> <span>${esc(it)}</span></label>`)
+          .join('')}</div>`,
+    )
+    .join('');
+  box.innerHTML = `<div class="info-card"><div class="info-h">🎒 持ち物リスト</div>${list}<p class="info-note">※AIの提案です。チェックして使ってください。</p></div>`;
+}
+
 // 実際にプラン作成ジョブを開始する（フォーム送信・行きたい作成・作り直しから共通で使う）。
 async function startPlan() {
   if (!validateForm()) return;
@@ -906,6 +956,8 @@ async function startPlan() {
   $('save-btn').classList.add('hidden');
   $('share-btn').classList.add('hidden');
   $('print-btn').classList.add('hidden');
+  $('packing-btn').classList.add('hidden');
+  $('packing-box').classList.add('hidden');
   $('refine-box').classList.add('hidden');
   try {
     await resolveArea($('area').value.trim());
@@ -1080,6 +1132,7 @@ async function loadAndRenderSavedPlan(planId) {
   renderPlan({ plan: d.result });
   $('share-btn').classList.remove('hidden');
   $('print-btn').classList.remove('hidden');
+  $('packing-btn').classList.remove('hidden');
   $('refine-box').classList.remove('hidden');
   setSaveButton(!!d.saved);
   const area = d.request && d.request.area;
@@ -1945,6 +1998,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('collect-btn').addEventListener('click', () => deepCollect(false));
   $('recollect-btn').addEventListener('click', () => deepCollect(true));
   $('share-btn').addEventListener('click', sharePlan);
+  $('packing-btn').addEventListener('click', genPacking);
   $('save-btn').addEventListener('click', saveCurrentPlan);
   $('print-btn').addEventListener('click', () => window.print());
   $('wish-plan-btn').addEventListener('click', genFromWishlist);

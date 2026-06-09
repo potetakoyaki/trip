@@ -46,6 +46,7 @@ import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 import { searchPlaces } from '../data/places';
 import { suggestAreas } from '../planner/suggest';
+import { generatePacking } from '../planner/packing';
 
 export const api = new Hono<{ Bindings: Env }>();
 
@@ -490,6 +491,30 @@ api.post('/collect/cancel', async (c) => {
 });
 
 // 入力エリアに似た「収集済みエリア」があれば返す（過去データ再利用の確認用）。
+// 持ち物リスト: 行き先・季節・日数・天気・予定からAIが生成する。
+api.post('/packing', async (c) => {
+  const raw = (await c.req.json<any>().catch(() => null)) || {};
+  let days: number | undefined;
+  let month: number | undefined;
+  if (DATE_RE.test(raw.startDate ?? '') && DATE_RE.test(raw.endDate ?? '')) {
+    const s = new Date(`${raw.startDate}T00:00:00Z`).getTime();
+    const e = new Date(`${raw.endDate}T00:00:00Z`).getTime();
+    const d = Math.round((e - s) / 86400000) + 1;
+    if (d > 0 && d <= 60) days = d;
+    month = Number(raw.startDate.slice(5, 7));
+  }
+  const groups = await generatePacking(c.env, {
+    area: str(raw.area, 80),
+    days,
+    month,
+    weather: str(raw.weather, 40),
+    companions: str(raw.companions, 40),
+    adults: Number.isFinite(Number(raw.adults)) ? Number(raw.adults) : undefined,
+    activities: strArr(raw.activities, 20),
+  });
+  return c.json({ groups });
+});
+
 // おまかせモード: 条件（出発地/交通/予算/日数/気分…）から行き先を3案AIが提案する。
 api.post('/suggest-areas', async (c) => {
   const raw = (await c.req.json<any>().catch(() => null)) || {};
