@@ -114,12 +114,17 @@
             </select>
           </div>
 
+          <label class="switch daytrip-switch">
+            <input type="checkbox" id="dayTrip" />
+            <span>🌅 日帰り（宿泊なし・その日に帰る）</span>
+          </label>
+
           <div class="grid-2">
             <div class="field">
-              <label for="startDate">開始日</label>
+              <label for="startDate" id="startDate-label">開始日</label>
               <input type="date" id="startDate" required />
             </div>
-            <div class="field">
+            <div class="field" id="endDate-field">
               <label for="endDate">終了日</label>
               <input type="date" id="endDate" required />
             </div>

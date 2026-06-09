@@ -334,6 +334,17 @@ function initDates() {
   $('endDate').value = addDays(start, 1);
 }
 
+// 日帰りモード: 終了日欄を隠して開始日に揃える（宿泊なし）。
+function setDayTrip(on) {
+  const ef = $('endDate-field');
+  if (ef) ef.classList.toggle('hidden', on);
+  const ed = $('endDate');
+  if (ed) ed.required = !on;
+  const lbl = $('startDate-label');
+  if (lbl) lbl.textContent = on ? '日付' : '開始日';
+  if (on && ed) ed.value = $('startDate').value;
+}
+
 async function loadCategories(preselect) {
   try {
     const { categories } = await api('/categories');
@@ -750,10 +761,12 @@ function pollCollect(area, gen) {
 }
 
 function buildPlanBody() {
+  const dayTrip = !!($('dayTrip') && $('dayTrip').checked);
   const body = {
     area: $('area').value.trim() || undefined,
     startDate: $('startDate').value,
-    endDate: $('endDate').value,
+    // 日帰りは終了日＝開始日（宿泊なし）。
+    endDate: dayTrip ? $('startDate').value : $('endDate').value,
     interests: [...selectedInterests],
     budget: $('budget').value ? Number($('budget').value) : undefined,
     pace: $('pace').value,
@@ -1728,10 +1741,12 @@ function renderCostCard() {
 }
 
 function renderCost(c) {
+  // 日帰り（0泊）は宿泊費の行を出さない。
   const hotelLabel = `ホテル${c.nights ? `（${c.nights}泊）` : ''}${c.hotelName ? `・${esc(c.hotelName)}` : ''}`;
   const hotelVal = c.hotelUnknown ? '料金不明' : yen(c.hotel);
+  const hotelRow = c.nights ? `<div class="cost-row"><span>${hotelLabel}</span><span>${hotelVal}</span></div>` : '';
   const rows =
-    `<div class="cost-row"><span>${hotelLabel}</span><span>${hotelVal}</span></div>` +
+    hotelRow +
     `<div class="cost-row"><span>食事</span><span>${yen(c.food)}</span></div>` +
     `<div class="cost-row"><span>観光・体験</span><span>${yen(c.activities)}</span></div>`;
   const stay = `<div class="cost-row total"><span>滞在費合計</span><b>${yen(c.stayTotal)}</b></div>`;
@@ -2117,10 +2132,18 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   $('startDate').addEventListener('change', () => {
     const s = $('startDate').value;
+    if (!s) return;
+    if ($('dayTrip') && $('dayTrip').checked) {
+      // 日帰りは終了日＝開始日。
+      $('endDate').value = s;
+      return;
+    }
     const e = $('endDate').value;
     // 終了日が未設定 or 開始日より前のときだけ自動補完（既存の複数日設定を壊さない）。
-    if (s && (!e || e < s)) $('endDate').value = addDays(s, 1);
+    if (!e || e < s) $('endDate').value = addDays(s, 1);
   });
+
+  if ($('dayTrip')) $('dayTrip').addEventListener('change', () => setDayTrip($('dayTrip').checked));
 
   loadHistory();
   loadWishlist();

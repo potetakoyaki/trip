@@ -83,24 +83,29 @@ export async function createPlan(
     }
   }
 
-  await report('情報を整理して宿泊先を検索中…', 68);
+  // 日帰り（開始日＝終了日・0泊）は宿泊先が不要なので検索しない。
+  const isDayTrip = !!body.startDate && body.startDate === body.endDate;
+
+  await report(isDayTrip ? '情報を整理しています…' : '情報を整理して宿泊先を検索中…', 68);
   // エリアの中心座標と都道府県を1回求め、ホテルの地域絞り込み・地図の誤ピン防止に使う。
   const areaCenter = body.area ? await geocodeQuery(env, body.area) : null;
   const areaPref = areaCenter ? await reversePrefecture(env, areaCenter.lat, areaCenter.lng) : undefined;
 
   let realHotels: Awaited<ReturnType<typeof fetchRakutenHotels>> = [];
-  try {
-    realHotels = await fetchRakutenHotels(env, body.area, origin, {
-      keywords: body.hotelFeatures,
-      maxPrice: body.budget,
-      limit: 24,
-      checkinDate: body.startDate,
-      checkoutDate: body.endDate,
-      prefecture: areaPref,
-      adults: body.adults,
-    });
-  } catch {
-    realHotels = [];
+  if (!isDayTrip) {
+    try {
+      realHotels = await fetchRakutenHotels(env, body.area, origin, {
+        keywords: body.hotelFeatures,
+        maxPrice: body.budget,
+        limit: 24,
+        checkinDate: body.startDate,
+        checkoutDate: body.endDate,
+        prefecture: areaPref,
+        adults: body.adults,
+      });
+    } catch {
+      realHotels = [];
+    }
   }
 
   await report('AIがプランを組み立て中…', 82);

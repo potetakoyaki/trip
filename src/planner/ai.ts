@@ -127,6 +127,7 @@ export async function generateAiPlan(
 
   const dates = enumerateDates(req.startDate, req.endDate);
   const nights = Math.max(0, dates.length - 1);
+  const isDayTrip = nights === 0; // 日帰り（宿泊なし）。
   const perDay = PER_DAY[req.pace ?? 'normal'];
 
   const byTitle = new Map<string, EventRecord>();
@@ -159,7 +160,11 @@ export async function generateAiPlan(
   if (req.area) cond.push(`旅行先エリア: ${req.area}`);
   if (req.origin) cond.push(`出発地点: ${req.origin}`);
   if (req.transport) cond.push(`移動手段: ${req.transport}`);
-  cond.push(`日程: ${dates.length}日間 / ${nights}泊（${dates[0]} 〜 ${dates[dates.length - 1]}）`);
+  cond.push(
+    isDayTrip
+      ? `日程: 日帰り（${dates[0]}・宿泊なし）。その日のうちに出発地へ帰る前提で、戻りの移動時間も考慮して無理なく組む。夜遅い予定や宿泊前提の項目は入れない。`
+      : `日程: ${dates.length}日間 / ${nights}泊（${dates[0]} 〜 ${dates[dates.length - 1]}）`,
+  );
   cond.push(`1日あたり ${perDay} 件程度`);
   if (req.interests?.length) cond.push(`興味: ${req.interests.join('、')}`);
   if (req.budget) cond.push(`予算(滞在費＋ホテル)の目安: 1人 ${req.budget.toLocaleString()}円`);
@@ -198,7 +203,9 @@ export async function generateAiPlan(
     '- enjoyment: このプラン全体をどう楽しむか「楽しみ方の提案」を150〜250字で。五感・季節・時間帯・組み合わせの妙など具体的に。',
     '- advice: 上手く回るコツを2個だけ（内容が重複しない、簡潔で具体的なものを厳選）',
     travelReq,
-    `- hotels: 「${req.area ?? '旅行先'}」の宿泊先を2〜3件（候補に宿泊系があれば優先、無ければ定番を一般知識で）。各 name, area, nightlyPrice(1泊1人の目安・円の数値), why(おすすめ理由)。`,
+    isDayTrip
+      ? '- hotels: 日帰りなので宿泊先は不要。hotels は空配列 [] にする。'
+      : `- hotels: 「${req.area ?? '旅行先'}」の宿泊先を2〜3件（候補に宿泊系があれば優先、無ければ定番を一般知識で）。各 name, area, nightlyPrice(1泊1人の目安・円の数値), why(おすすめ理由)。`,
     '- days[].theme: その日のねらい',
     `- days[].items[]: ${titleRule}, time(例"10:00"), category,`,
     '   why(このスポットのオススメの楽しみ方を40〜70字で簡潔に。名物・回り方・ベスト時間帯のうち要点だけ。同じ語の繰り返しは避ける),',
@@ -355,7 +362,8 @@ export async function generateAiPlan(
             why: cleanStr(h.why),
           }))
       : [];
-    const hotels = opts.hotels && opts.hotels.length ? opts.hotels : aiHotels;
+    // 日帰りは宿泊なし。複数日のみホテルを採用する。
+    const hotels = isDayTrip ? [] : opts.hotels && opts.hotels.length ? opts.hotels : aiHotels;
 
     // 移動
     let travel = undefined;

@@ -254,6 +254,9 @@ select:focus {
   accent-color: var(--brand);
   cursor: pointer;
 }
+.daytrip-switch {
+  margin: 0 0 12px;
+}
 
 .checks {
   display: flex;
