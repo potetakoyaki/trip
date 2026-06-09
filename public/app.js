@@ -1671,10 +1671,16 @@ function renderTravel(t) {
   if (t.duration) bits.push(`片道 ${esc(t.duration)}`);
   if (t.costRoundTrip) bits.push(`往復 ${yen(t.costRoundTrip)}`);
   const mode = t.mode ? `（${esc(t.mode)}）` : '';
+  // 乗換案内：出発地→目的地の公共交通ルート（Googleマップ transit）。
+  const transitLink =
+    t.from && t.to
+      ? `<div class="item-links"><a href="https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(t.from)}&destination=${encodeURIComponent(t.to)}&travelmode=transit" target="_blank" rel="noopener">🚉 乗換案内</a></div>`
+      : '';
   return `<div class="info-card">
     <div class="info-h">🚆 ${esc(t.from || '出発地')} → ${esc(t.to || '目的地')}${mode}</div>
     ${bits.length ? `<div class="pills">${bits.map((b) => `<span class="pill">${b}</span>`).join('')}</div>` : ''}
     ${t.note ? `<p class="info-note">${esc(t.note)}</p>` : ''}
+    ${transitLink}
   </div>`;
 }
 
@@ -1915,6 +1921,13 @@ function renderItem(it, dayIndex, idx, count, clock) {
     `<a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">📍 地図</a>`,
     `<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 公式')}" target="_blank" rel="noopener">🔎 公式サイト</a>`,
   ];
+  // 口コミ：グルメは食べログ、それ以外はGoogleの「口コミ・評判」検索。
+  const cat = it.category || '';
+  if (cat.includes('グルメ') || cat.includes('食') || cat.includes('レストラン') || cat.includes('カフェ')) {
+    links.push(`<a href="https://tabelog.com/rstLst/?sw=${encodeURIComponent(it.title)}" target="_blank" rel="noopener">⭐ 口コミ</a>`);
+  } else {
+    links.push(`<a href="https://www.google.com/search?q=${encodeURIComponent(it.title + ' 口コミ 評判')}" target="_blank" rel="noopener">⭐ 口コミ</a>`);
+  }
   if (it.url) links.push(`<a href="${esc(it.url)}" target="_blank" rel="noopener">📰 情報元</a>`);
 
   return `
