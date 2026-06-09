@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isEventSiteHost, buildEventQueries, isPastEventDate, eventListPageUrls } from '../src/scrape/autosource';
+import { isEventSiteHost, buildEventQueries, isPastEventDate, pageUrlFor } from '../src/scrape/autosource';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 
 describe('isEventSiteHost: イベント情報サイトの判定', () => {
@@ -40,20 +40,19 @@ describe('buildEventQueries: イベント検索クエリ', () => {
   });
 });
 
-describe('eventListPageUrls: ページ送りURL生成', () => {
-  it('末尾スラッシュのリストURLに N.html を付ける', () => {
-    const urls = eventListPageUrls('https://www.walkerplus.com/event_list/ar0832/', 4);
-    expect(urls).toEqual([
-      'https://www.walkerplus.com/event_list/ar0832/',
-      'https://www.walkerplus.com/event_list/ar0832/2.html',
-      'https://www.walkerplus.com/event_list/ar0832/3.html',
-      'https://www.walkerplus.com/event_list/ar0832/4.html',
-    ]);
+describe('pageUrlFor: ページ送りURL生成', () => {
+  const base = 'https://www.walkerplus.com/event_list/ar0832/';
+  it('p<=1 はベース、p>=2 は N.html を付ける', () => {
+    expect(pageUrlFor(base, 1)).toBe(base);
+    expect(pageUrlFor(base, 2)).toBe(`${base}2.html`);
+    expect(pageUrlFor(base, 8)).toBe(`${base}8.html`);
   });
 
-  it('クエリ付き/末尾が非スラッシュのURLはそのまま（誤生成しない）', () => {
-    expect(eventListPageUrls('https://x.com/a?b=1', 3)).toEqual(['https://x.com/a?b=1']);
-    expect(eventListPageUrls('https://x.com/detail/e001', 3)).toEqual(['https://x.com/detail/e001']);
+  it('クエリ付き/末尾が非スラッシュのURLは段送り不可で null', () => {
+    expect(pageUrlFor('https://x.com/a?b=1', 2)).toBeNull();
+    expect(pageUrlFor('https://x.com/detail/e001', 2)).toBeNull();
+    // p<=1 は段送りせずベースを返す
+    expect(pageUrlFor('https://x.com/detail/e001', 1)).toBe('https://x.com/detail/e001');
   });
 });
 

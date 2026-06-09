@@ -28,6 +28,7 @@ export async function processOneRound(env: Env, area: string): Promise<void> {
       interests: job.interests ? safeParse(job.interests) : undefined,
       queries,
       maxPages: 8,
+      eventPages: 30, // じっくり収集は深く（イベントを最大限ためる）
       // 再収集(pass)のたびに、検索結果のより深い位置を取りに行く（同じ上位の重複を避ける）。
       resultOffset: (job.pass ?? 0) * 2,
     });

@@ -66,6 +66,7 @@ export async function createPlan(
           interests: body.interests,
           keyword: body.keyword,
           startDate: body.startDate,
+          eventPages: 14, // プランは応答性優先で控えめ（深掘りは「じっくり収集」が担う）
           onExtractStart: () => report('スポット情報を抽出中…', 50),
         });
       } catch {

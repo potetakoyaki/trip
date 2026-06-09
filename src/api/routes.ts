@@ -190,8 +190,10 @@ api.get('/diag/events', async (c) => {
   if (!area) return c.json({ error: 'area が必要です（例: /api/diag/events?area=出雲市&month=11）' }, 400);
   const mq = Number(c.req.query('month'));
   const month = Number.isFinite(mq) && mq >= 1 && mq <= 12 ? mq : undefined;
+  const pq = Number(c.req.query('pages'));
+  const pages = Number.isFinite(pq) && pq > 0 ? Math.min(40, Math.round(pq)) : 30;
   try {
-    const result = await diagCollectEventSites(c.env, area, month);
+    const result = await diagCollectEventSites(c.env, area, month, pages);
     return c.json(result);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
