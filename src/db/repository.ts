@@ -482,6 +482,45 @@ export async function ensureEventsColumns(db: D1Database): Promise<void> {
 }
 
 /** 正規化イベントを upsert。重複は (source, source_event_id) で更新。件数を返す。 */
+/**
+ * イベント情報サイト（ウォーカープラス等）の発見済みリストURLを都道府県ごとにキャッシュする。
+ * 一度発見すれば次回は検索（Jina等）不要で直接取得でき、レート制限に強くなる。
+ */
+export async function ensureEventSourceCache(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS event_source_cache (
+        pref TEXT PRIMARY KEY, urls TEXT NOT NULL, updated_at TEXT NOT NULL
+      )`,
+    )
+    .run();
+}
+
+export async function getEventSourceUrls(db: D1Database, pref: string): Promise<string[]> {
+  if (!pref) return [];
+  await ensureEventSourceCache(db);
+  const row = await db.prepare('SELECT urls FROM event_source_cache WHERE pref = ?').bind(pref).first<{ urls: string }>();
+  if (!row?.urls) return [];
+  try {
+    const arr = JSON.parse(row.urls);
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function putEventSourceUrls(db: D1Database, pref: string, urls: string[]): Promise<void> {
+  if (!pref || !urls.length) return;
+  await ensureEventSourceCache(db);
+  await db
+    .prepare(
+      `INSERT INTO event_source_cache (pref, urls, updated_at) VALUES (?,?,?)
+       ON CONFLICT(pref) DO UPDATE SET urls = excluded.urls, updated_at = excluded.updated_at`,
+    )
+    .bind(pref, JSON.stringify(urls.slice(0, 12)), new Date().toISOString())
+    .run();
+}
+
 export async function upsertEvents(
   db: D1Database,
   source: string,

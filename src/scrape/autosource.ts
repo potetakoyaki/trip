@@ -3,8 +3,18 @@ import { HttpClient } from './http';
 import { extractReadableText } from './readable';
 import { extractJsonLdScripts, parseJsonLdEvents } from './jsonld';
 import { extractSpots } from './ai-extract';
-import { upsertEvents } from '../db/repository';
+import { upsertEvents, getEventSourceUrls, putEventSourceUrls } from '../db/repository';
 import { inferCategory, inferPrefecture } from '../util/normalize';
+import { prefectureOf } from '../data/places';
+
+/**
+ * 検証済みのウォーカープラス リストURL（都道府県→直URL）。検索(Jina)に頼らず直接取得できる。
+ * ※ /api/diag/events の実データで確認できたものだけを載せる（憶測のコードは入れない）。
+ *   ar0832 = 島根県（実データで確認済み）。他県は発見時にDBへ自動キャッシュされる。
+ */
+const KNOWN_WALKERPLUS: Record<string, string[]> = {
+  島根県: ['https://www.walkerplus.com/event_list/ar0832/', 'https://hanabi.walkerplus.com/list/ar0832/'],
+};
 
 export interface DiscoverResult {
   total: number;
@@ -260,8 +270,30 @@ export async function discoverAndScrape(
   };
 }
 
+/**
+ * イベントサイトのリストURLを決める。
+ * 1) 既知（検証済み・内蔵）→ 2) DBキャッシュ（過去に発見）→ 3) 検索で発見（Jina等）。
+ * 1・2 は検索不要なのでJinaのレート制限に強い。3で発見できたら県ごとにキャッシュする。
+ */
+async function resolveEventSiteUrls(
+  http: HttpClient,
+  env: Env,
+  area: string,
+  month?: number,
+): Promise<{ urls: string[]; prefecture?: string; source: 'seed' | 'cache' | 'search' }> {
+  const pref = prefectureOf(area);
+  if (pref && KNOWN_WALKERPLUS[pref]) return { urls: KNOWN_WALKERPLUS[pref], prefecture: pref, source: 'seed' };
+  if (pref) {
+    const cached = await getEventSourceUrls(env.DB, pref).catch(() => [] as string[]);
+    if (cached.length) return { urls: cached, prefecture: pref, source: 'cache' };
+  }
+  const found = await searchEventSiteUrls(http, env, area, month);
+  if (found.length && pref) await putEventSourceUrls(env.DB, pref, found).catch(() => {});
+  return { urls: found, prefecture: pref, source: 'search' };
+}
+
 /** イベントサイトのURLを検索で集める（ウォーカープラス等のホストだけ残す）。 */
-async function findEventSiteUrls(http: HttpClient, env: Env, area: string, month?: number): Promise<string[]> {
+async function searchEventSiteUrls(http: HttpClient, env: Env, area: string, month?: number): Promise<string[]> {
   const queries = buildEventQueries(area, month);
   const urls: string[] = [];
   for (const q of queries) {
@@ -359,7 +391,7 @@ async function collectEventSites(
   month?: number,
   maxPages = 16,
 ): Promise<NormalizedEvent[]> {
-  const base = await findEventSiteUrls(http, env, area, month);
+  const { urls: base } = await resolveEventSiteUrls(http, env, area, month);
   const targets = expandEventTargets(base, maxPages);
   // 別ホスト(hanabi./koyo./www./jorudan/iko-yo)は並列で速く、同ホストはHttpClientが間隔調整。
   const perPage = await mapLimit(targets, 6, async (url) => {
@@ -382,7 +414,7 @@ async function collectEventSites(
 export async function diagCollectEventSites(env: Env, area: string, month?: number, maxPages = 16) {
   const http = new HttpClient({ userAgent: BROWSER_UA, minIntervalMs: 600 });
   const queries = buildEventQueries(area, month);
-  const base = await findEventSiteUrls(http, env, area, month);
+  const { urls: base, prefecture, source } = await resolveEventSiteUrls(http, env, area, month);
   const targets = expandEventTargets(base, maxPages);
   const pages = await mapLimit(targets, 6, async (url) => {
     const { html, via } = await fetchEventHtml(http, env, url);
@@ -404,6 +436,8 @@ export async function diagCollectEventSites(env: Env, area: string, month?: numb
   const upcoming = distinct.filter((e) => !isPastEventDate(e, today));
   return {
     area,
+    prefecture,
+    source, // seed(内蔵) / cache(DB) / search(検索)。Jina非依存かどうかが分かる。
     month,
     queries,
     eventSiteUrls: base,
