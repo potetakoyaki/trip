@@ -63,7 +63,7 @@
       <section class="card form-card">
         <div class="mode-tabs" role="tablist">
           <button type="button" id="tab-manual" class="mode-tab active">✍️ 自分で決める</button>
-          <button type="button" id="tab-auto" class="mode-tab">🎲 おまかせ（行き先もAI）</button>
+          <button type="button" id="tab-auto" class="mode-tab">🎲 おまかせ</button>
         </div>
         <p id="auto-note" class="auto-note hidden">
           🎲 行き先はAIが提案します。出発地・交通・予算・日数・気分などを入れて「行き先を提案」を押してください。
@@ -94,6 +94,18 @@
                 <option value="高速バス">高速バス</option>
               </select>
             </div>
+          </div>
+
+          <div class="field">
+            <label for="maxHours">移動時間の上限（片道・おまかせ用）</label>
+            <select id="maxHours">
+              <option value="">指定なし</option>
+              <option value="1">1時間以内</option>
+              <option value="2">2時間以内</option>
+              <option value="3">3時間以内</option>
+              <option value="4">4時間以内</option>
+              <option value="6">6時間以内</option>
+            </select>
           </div>
 
           <div class="grid-2">
@@ -189,7 +201,7 @@
           <div class="options">
             <label class="switch">
               <input type="checkbox" id="thorough" />
-              <span>🔍 じっくりモード（高性能AIで丁寧に作成・無料枠を多めに使用）</span>
+              <span>🔍 じっくりモード（高品質・無料枠を多めに使用）</span>
             </label>
           </div>
 
@@ -197,12 +209,13 @@
             <span class="btn-label">プランを作成する</span>
           </button>
 
-          <button type="button" class="btn-secondary" id="collect-btn">🔬 じっくり収集（バックグラウンド・数分／画面を閉じてもOK）</button>
+          <button type="button" class="btn-secondary" id="collect-btn">🔬 じっくり収集（数分・画面を閉じてもOK）</button>
           <!-- 収集済みエリアでじっくり収集を押したときだけ、ここ（収集ボタン直下）に出る -->
           <button type="button" id="recollect-btn" class="recollect-btn hidden" title="収集済みのエリアを、別の角度・より深い検索で集め直します">🔄 別の角度で集め直す（収集済み）</button>
 
           <p class="hint">
-            💡 登録は不要です。エリアを入れて作成すると、アプリが自動で情報を集めてプラン化します（初回は数十秒かかることがあります）。
+            💡 登録は不要です。エリアを入れて作成すると、アプリが自動で情報を集めてプラン化します。<br />
+            （初回は数分かかることがあります）
           </p>
         </form>
         <div id="collect-progress" class="collect-progress hidden">

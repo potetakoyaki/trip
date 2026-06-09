@@ -1058,14 +1058,14 @@ select:focus {
 .drawer-section > summary {
   list-style: none;
   cursor: pointer;
-  font-weight: 800;
-  font-size: 0.98rem;
+  font-weight: 600;
+  font-size: 0.95rem;
   color: var(--ink);
   padding: 13px 14px;
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #f8faff;
+  background: #faf6ec;
 }
 .drawer-section > summary::-webkit-details-marker {
   display: none;
@@ -1840,6 +1840,10 @@ footer {
   .grid-2 {
     grid-template-columns: 1fr;
   }
+  /* 条件3列（天気/同行者/テーマ）はスマホでは縦並びに（テキスト切れ防止）。 */
+  .grid-3 {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------- 再収集ボタン（「収集済み」メッセージの下に出る） ---------- */
@@ -1890,6 +1894,7 @@ footer {
   font-size: 0.9rem;
   color: var(--ink-soft);
   cursor: pointer;
+  white-space: nowrap;
   transition: background 0.15s, color 0.15s;
 }
 .mode-tab.active {
@@ -1937,8 +1942,18 @@ footer {
   color: var(--ink-soft);
   white-space: nowrap;
 }
+.suggest-hook {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--brand-ink);
+  background: #fbf5e3;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin: 8px 0 6px;
+  line-height: 1.55;
+}
 .suggest-reason {
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   color: var(--ink-soft);
   margin: 6px 0 8px;
   line-height: 1.6;
