@@ -911,6 +911,9 @@ function renderConcepts(concepts) {
     btn.addEventListener('click', () => {
       const c = concepts[Number(btn.dataset.i)];
       selectedConcept = c ? c.title : null;
+      // 選んだら他のテーマは消す（行き先を取得して出し直す。ローディング中に並んだままにしない）。
+      box.classList.add('hidden');
+      box.innerHTML = '';
       suggestAreasFlow(); // 選んだテーマに合う行き先へ
     });
   });
