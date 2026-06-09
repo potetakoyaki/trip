@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { isEventSiteHost, buildEventQueries, isPastEventDate, pageUrlFor } from '../src/scrape/autosource';
+import {
+  isEventSiteHost,
+  buildEventQueries,
+  isPastEventDate,
+  pageUrlFor,
+  findWalkerplusArCode,
+} from '../src/scrape/autosource';
 import { parseJsonLdEvents } from '../src/scrape/jsonld';
 
 describe('isEventSiteHost: イベント情報サイトの判定', () => {
@@ -53,6 +59,30 @@ describe('pageUrlFor: ページ送りURL生成', () => {
     expect(pageUrlFor('https://x.com/detail/e001', 2)).toBeNull();
     // p<=1 は段送りせずベースを返す
     expect(pageUrlFor('https://x.com/detail/e001', 1)).toBe('https://x.com/detail/e001');
+  });
+});
+
+describe('findWalkerplusArCode: インデックスHTMLから県コードを引く', () => {
+  const html = `
+    <ul class="area-nav">
+      <li><a href="/event_list/ar0101/">北海道</a></li>
+      <li><a href="/event_list/ar0313/">東京</a></li>
+      <li><a href="/event_list/ar0314/">神奈川</a></li>
+      <li><a href="/event_list/ar0626/">京都</a></li>
+      <li><a href="/event_list/ar0832/">島根</a></li>
+    </ul>`;
+  it('県名（接尾辞あり）からコードを引く', () => {
+    expect(findWalkerplusArCode(html, '島根県')).toBe('ar0832');
+    expect(findWalkerplusArCode(html, '東京都')).toBe('ar0313');
+    expect(findWalkerplusArCode(html, '京都府')).toBe('ar0626');
+    expect(findWalkerplusArCode(html, '神奈川県')).toBe('ar0314');
+  });
+  it('北海道（接尾辞なし扱い）も引ける', () => {
+    expect(findWalkerplusArCode(html, '北海道')).toBe('ar0101');
+  });
+  it('該当が無ければ null', () => {
+    expect(findWalkerplusArCode(html, '沖縄県')).toBeNull();
+    expect(findWalkerplusArCode('<p>no links</p>', '東京都')).toBeNull();
   });
 });
 

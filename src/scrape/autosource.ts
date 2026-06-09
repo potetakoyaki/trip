@@ -269,22 +269,68 @@ export async function discoverAndScrape(
   };
 }
 
+/** 都道府県名から接尾辞を外した照合用の名前（島根県→島根 / 東京都→東京 / 北海道→北海道）。 */
+function prefBareName(prefecture: string): string {
+  return prefecture.replace(/[都府県]$/, '');
+}
+
 /**
- * イベントサイトのリストURLを決める。
- * 1) 既知（検証済み・内蔵）→ 2) DBキャッシュ（過去に発見）→ 3) 検索で発見（Jina等）。
- * 1・2 は検索不要なのでJinaのレート制限に強い。3で発見できたら県ごとにキャッシュする。
+ * Walker Plus の全国イベントインデックスHTMLから、指定都道府県の ar コードを探す。
+ * 例: <a href="/event_list/ar0832/">島根</a> → "ar0832"。県名は接尾辞あり/なし両対応。
+ * 純粋関数（テスト可能）。検索(Jina)に頼らずコードを得る要。
+ */
+export function findWalkerplusArCode(html: string, prefecture: string): string | null {
+  const bare = prefBareName(prefecture);
+  if (!bare) return null;
+  const re = /\/event_list\/(ar\d{3,4})\/"[^>]*>\s*([^<]{1,24})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const code = m[1];
+    const label = m[2].trim();
+    if (label && (label.includes(bare) || bare.includes(label))) return code;
+  }
+  return null;
+}
+
+/** Walker Plus の ar コードから、収集に使うリストURL（一般＋花火）を組み立てる。 */
+function walkerplusUrlsForCode(code: string): string[] {
+  return [`https://www.walkerplus.com/event_list/${code}/`, `https://hanabi.walkerplus.com/list/${code}/`];
+}
+
+/**
+ * Walker Plus 全国インデックスを直接取得し、その県の ar コードからリストURLを得る。
+ * Jina非依存（直接取得が弾かれた時だけ Jina(html) にフォールバック）。発見できれば[]以外。
+ */
+async function discoverWalkerplusFromIndex(http: HttpClient, env: Env, prefecture: string): Promise<string[]> {
+  const { html } = await fetchEventHtml(http, env, 'https://www.walkerplus.com/event_list/');
+  if (!html) return [];
+  const code = findWalkerplusArCode(html, prefecture);
+  return code ? walkerplusUrlsForCode(code) : [];
+}
+
+/**
+ * イベントサイトのリストURLを決める（Jina非依存を最優先）。
+ * 1) 既知（検証済み・内蔵）→ 2) DBキャッシュ → 3) Walker Plus 全国インデックスから直接発見
+ * → 4) 検索で発見（Jina等・最後の手段）。1〜3 は検索不要でレート制限に強い。発見したら県毎にキャッシュ。
  */
 async function resolveEventSiteUrls(
   http: HttpClient,
   env: Env,
   area: string,
   month?: number,
-): Promise<{ urls: string[]; prefecture?: string; source: 'seed' | 'cache' | 'search' }> {
+): Promise<{ urls: string[]; prefecture?: string; source: 'seed' | 'cache' | 'index' | 'search' }> {
   const pref = prefectureOf(area);
   if (pref && KNOWN_WALKERPLUS[pref]) return { urls: KNOWN_WALKERPLUS[pref], prefecture: pref, source: 'seed' };
   if (pref) {
     const cached = await getEventSourceUrls(env.DB, pref).catch(() => [] as string[]);
     if (cached.length) return { urls: cached, prefecture: pref, source: 'cache' };
+  }
+  if (pref) {
+    const idx = await discoverWalkerplusFromIndex(http, env, pref).catch(() => [] as string[]);
+    if (idx.length) {
+      await putEventSourceUrls(env.DB, pref, idx).catch(() => {});
+      return { urls: idx, prefecture: pref, source: 'index' };
+    }
   }
   const found = await searchEventSiteUrls(http, env, area, month);
   if (found.length && pref) await putEventSourceUrls(env.DB, pref, found).catch(() => {});
