@@ -157,9 +157,18 @@ api.get('/diag/hotel', async (c) => {
     });
     const url = `https://openapi.rakuten.co.jp/engine/api/Travel/VacantHotelSearch/20170426?${params.toString()}`;
     try {
-      const res = await fetch(url, {
-        headers: { 'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)', Accept: 'application/json' },
-      });
+      // 新APIは Referer 必須（無いと 403 REQUEST_CONTEXT_BODY_HTTP_REFERRER_MISSING）。
+      // 実プラン経路と同じく Origin/Referer を付ける。
+      const o = reqOrigin(c.req.url);
+      const vHeaders: Record<string, string> = {
+        'User-Agent': env.USER_AGENT ?? 'TripPlannerBot/0.1 (personal use)',
+        Accept: 'application/json',
+      };
+      if (o) {
+        vHeaders.Origin = o;
+        vHeaders.Referer = o.endsWith('/') ? o : o + '/';
+      }
+      const res = await fetch(url, { headers: vHeaders });
       const text = await res.text();
       let data: any = null;
       try {
