@@ -75,9 +75,10 @@ export function generateRulePlan(events: EventRecord[], req: PlanRequest): Plan 
   const dates = enumerateDates(req.startDate, req.endDate);
   const perDay = ITEMS_PER_DAY[req.pace ?? 'normal'];
 
-  // エリア＆予算で大まかに絞り込み、スコア付け
+  // エリア＆予算で大まかに絞り込み、スコア付け。宿泊施設は行程に入れない（宿泊先は別カード）。
   const candidates: Scored[] = events
     .filter((e) => areaMatches(e, req.area))
+    .filter((e) => e.category !== '宿泊' && !/ホテル|旅館|ホステル|ゲストハウス|ペンション/.test(e.title ?? ''))
     .map((e) => ({ e, score: scoreEvent(e, req) }))
     .sort((a, b) => b.score - a.score);
 

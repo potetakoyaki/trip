@@ -213,6 +213,7 @@ export async function generateAiPlan(
     '   estCost(その場所で1人が実際に使う費用の現実的な目安・円の数値。観光施設は入場料の実費、無料スポットは0。飲食店は ランチ1000〜2500・カフェ500〜1200・ディナー3000〜6000 を目安に内容相応で。安易に0や極端に低い額にしない),',
     '   hours(営業時間。一般知識でおおよそで良いので必ず入れる。例 "9:00-17:00"。24時間営業は "24時間"、店舗で不明確なら "11:00-22:00頃"),',
     '   lat,lng(その場所のおおよその緯度・経度の数値。移動時間の概算に使う)。',
+    '- 宿泊施設（ホテル/旅館）は days の項目に入れない（宿泊先は別カードで提示・選択するため）。観光・グルメ・体験・移動のみ。',
     '- 各日に必ず昼食(ランチ)を1件入れる。夜まで滞在する日は夕食も。食事のitemは category="グルメ" とし、why に名物料理・おすすめメニュー・予算感を簡潔に書く。estCost は上記の目安で必ず現実的な金額を入れる（0や数百円にしない）。',
     '  候補に飲食店が少なければ、そのエリアで評判の料理ジャンルや店を一般知識で提案してよい。',
     pickRule,
@@ -314,9 +315,11 @@ export async function generateAiPlan(
       for (const it of [...capped, ...extras]) {
         const title = String(it?.title ?? '').trim();
         if (!title || used.has(title)) continue;
-        used.add(title);
         const rec = matchRecord(byTitle, title);
         const category = rec?.category ?? cleanStr(it?.category);
+        // 宿泊施設（ホテル/旅館）は行程の項目に入れない（宿泊先は別カードで選ぶため重複・不整合になる）。
+        if (category === '宿泊' || /ホテル|旅館|ホステル|ゲストハウス|ペンション|温泉宿|料金\s*¥/.test(title)) continue;
+        used.add(title);
         let estCost = rec?.price ?? cleanNum(it?.estCost);
         // 食事は0や極端に低い額になりがちなので、時間帯から現実的な下限で補正する。
         if (category === 'グルメ' && (estCost == null || estCost < 500)) {

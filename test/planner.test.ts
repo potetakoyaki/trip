@@ -92,6 +92,17 @@ describe('generateRulePlan', () => {
     expect(day1Titles).toContain('日付固定イベント');
   });
 
+  it('宿泊施設(ホテル/旅館)は行程に入れない', () => {
+    const evs = [
+      ...events,
+      ev({ id: 'h1', title: '箱根温泉ホテル', category: '宿泊', prefecture: '神奈川県', city: '箱根町' }),
+      ev({ id: 'h2', title: '強羅旅館', category: 'その他', prefecture: '神奈川県', city: '箱根町' }),
+    ];
+    const plan = generateRulePlan(evs, req);
+    const titles = plan.days.flatMap((d) => d.items.map((i) => i.title));
+    expect(titles).not.toContain('箱根温泉ホテル'); // category=宿泊で除外
+  });
+
   it('候補ゼロでも壊れない', () => {
     const plan = generateRulePlan([], req);
     expect(plan.days).toHaveLength(2);
