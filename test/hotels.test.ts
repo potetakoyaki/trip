@@ -97,4 +97,23 @@ describe('rakutenHotelSearch 楽天トラベル連携', () => {
     // 萩の宿(8000)は除外、荻窪(5000)は残る（県絞り無しの場合）
     expect(r.hotels.every((h) => h.nightlyPrice == null || h.nightlyPrice <= 6000)).toBe(true);
   });
+
+  it('キャンプ場は除外し、希望条件(温泉)に合う宿を上位にする', async () => {
+    const KW = {
+      hotels: [
+        { hotel: [{ hotelBasicInfo: { hotelName: 'みろく自然公園キャンプ場', hotelNo: 10, address1: '香川県', address2: 'さぬき市', hotelMinCharge: 3000 } }] },
+        { hotel: [{ hotelBasicInfo: { hotelName: 'ビジネスホテルさぬき', hotelNo: 11, address1: '香川県', address2: 'さぬき市', hotelMinCharge: 5000 } }] },
+        { hotel: [{ hotelBasicInfo: { hotelName: 'さぬき温泉旅館', hotelNo: 12, address1: '香川県', address2: 'さぬき市', hotelSpecial: '露天風呂と夕食の会席が自慢', hotelMinCharge: 9000 } }] },
+      ],
+      pagingInfo: { pageCount: 1 },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: any) => (String(url).includes('KeywordHotelSearch') ? mockRes(KW) : mockRes({}))),
+    );
+    const r = await rakutenHotelSearch(env(), 'さぬき市', undefined, { keywords: ['温泉', '夕食付き'], limit: 10 });
+    const names = r.hotels.map((h) => h.name);
+    expect(names).not.toContain('みろく自然公園キャンプ場'); // キャンプ場は除外
+    expect(r.hotels[0].name).toBe('さぬき温泉旅館'); // 温泉・夕食に合う宿が先頭
+  });
 });
