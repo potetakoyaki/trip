@@ -898,6 +898,14 @@ select:focus {
   background: #ecfdf5;
   color: #047857;
 }
+/* ラベル（オススメの楽しみ方 / 行き方）は独立した行にして、本文を次の行から始める（スマホで読みやすく）。 */
+.why b.detail-label,
+.access b.detail-label {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 5px;
+}
 .item-sub {
   margin-top: 9px;
   padding-top: 8px;

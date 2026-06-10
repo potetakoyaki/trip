@@ -2051,8 +2051,8 @@ function renderItem(it, dayIndex, idx, count, clock) {
   const detail = [];
   // 「おすすめ」と「楽しみ方」は1つの「オススメの楽しみ方」に統合（重複回避）。
   const enjoy = it.why || it.tips;
-  if (enjoy) detail.push(`<p class="why"><b>💡 オススメの楽しみ方</b>${esc(enjoy)}</p>`);
-  if (it.access) detail.push(`<p class="access"><b>🚃 行き方</b>${esc(it.access)}</p>`);
+  if (enjoy) detail.push(`<p class="why"><b class="detail-label">💡 オススメの楽しみ方</b>${esc(enjoy)}</p>`);
+  if (it.access) detail.push(`<p class="access"><b class="detail-label">🚃 行き方</b>${esc(it.access)}</p>`);
   const sub = [];
   if (it.duration) sub.push(`⏱ 滞在目安 ${esc(it.duration)}`);
   if (it.alt) sub.push(`🔄 ${esc(it.alt)}`);
