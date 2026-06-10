@@ -876,7 +876,9 @@ async function suggestConceptsFlow(exclude) {
     });
     hideProgressBar();
     setBusy(false);
-    const concepts = r.concepts || [];
+    // 既出のテーマは表示しない（AIが除外を守らず重複を返すことがあるためクライアント側でも除く）。
+    const prev = new Set(exclude || []);
+    const concepts = (r.concepts || []).filter((c) => c && c.title && !prev.has(c.title));
     lastConcepts = Array.from(new Set([...(exclude || []), ...concepts.map((c) => c.title)]));
     renderConcepts(concepts);
   } catch (e) {
@@ -950,7 +952,9 @@ async function suggestAreasFlow(exclude) {
     });
     hideProgressBar();
     setBusy(false);
-    const areas = r.areas || [];
+    // 既出の行き先は表示しない（AIが除外を守らず重複を返すことがあるためクライアント側でも除く）。
+    const prev = new Set(exclude || []);
+    const areas = (r.areas || []).filter((a) => a && a.area && !prev.has(a.area));
     // 再考の累積除外: 今回出た案も次の「再考」では避ける。
     lastSuggested = Array.from(new Set([...(exclude || []), ...areas.map((a) => a.area)]));
     renderSuggestions(areas);
@@ -2100,6 +2104,52 @@ function esc(s) {
   );
 }
 
+// 「📍 現在地を使う」: ブラウザの位置情報→逆ジオコーディングで地名を出発地に入れる。
+function useCurrentLocation() {
+  const btn = $('geo-btn');
+  if (!navigator.geolocation) {
+    setStatus('この端末/ブラウザでは現在地を取得できません。', 'err');
+    return;
+  }
+  const reset = () => {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '📍 現在地を使う';
+    }
+  };
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '取得中…';
+  }
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        const { latitude, longitude } = pos.coords;
+        const r = await api(`/reverse-geocode?lat=${latitude}&lng=${longitude}`);
+        if (r && r.name) {
+          $('origin').value = r.name;
+          setStatus(`出発地を「${r.name}」に設定しました。`, 'ok');
+        } else {
+          setStatus('現在地の地名を特定できませんでした。手入力してください。', 'err');
+        }
+      } catch (e) {
+        setStatus('現在地の取得に失敗しました: ' + e.message, 'err');
+      } finally {
+        reset();
+      }
+    },
+    (err) => {
+      reset();
+      const msg =
+        err.code === 1
+          ? '位置情報の利用が許可されていません。ブラウザ/端末の設定で許可してください。'
+          : '現在地を取得できませんでした。電波の良い場所で再度お試しください。';
+      setStatus(msg, 'err');
+    },
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
+  );
+}
+
 // --- bootstrap ---
 // エリア入力の地名オートコンプリート（県＋市を確定させ、荻/萩の取り違え等を防ぐ）。
 function setupAreaAutocomplete() {
@@ -2148,6 +2198,8 @@ function setupAreaAutocomplete() {
 window.addEventListener('DOMContentLoaded', async () => {
   initDates();
   setupAreaAutocomplete();
+  const geoBtn = $('geo-btn');
+  if (geoBtn) geoBtn.addEventListener('click', useCurrentLocation);
   $('tab-manual').addEventListener('click', () => setPlanMode('manual'));
   $('tab-auto').addEventListener('click', () => setPlanMode('auto'));
   $('plan-form').addEventListener('submit', submitPlan);

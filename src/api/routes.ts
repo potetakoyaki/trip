@@ -45,6 +45,7 @@ import { AI_MODELS } from '../planner/ai';
 import { geminiEnabled, geminiGenerate } from '../planner/gemini';
 import { ALL_CATEGORIES, inferPrefecture } from '../util/normalize';
 import { searchPlaces } from '../data/places';
+import { reversePlaceName } from '../scrape/geocode';
 import { suggestAreas, suggestConcepts } from '../planner/suggest';
 import { generatePacking } from '../planner/packing';
 
@@ -222,6 +223,17 @@ api.get('/diag/events', async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
+});
+
+// 緯度経度→地名（出発地に「現在地を使う」ため）。例: /api/reverse-geocode?lat=35.69&lng=139.70
+api.get('/reverse-geocode', async (c) => {
+  const lat = Number(c.req.query('lat'));
+  const lng = Number(c.req.query('lng'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return c.json({ error: 'lat/lng が必要です' }, 400);
+  }
+  const name = await reversePlaceName(c.env, lat, lng);
+  return c.json({ name: name ?? null });
 });
 
 /** リクエストURLからオリジン（https://host）を取り出す。楽天新APIのOrigin/Referer用。 */
