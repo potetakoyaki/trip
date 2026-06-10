@@ -65,7 +65,12 @@ export async function rakutenHotelSearch(
   if (!area) return { ok: false, status: 0, hotels: [], error: 'エリア未指定' };
 
   // 都道府県を先頭に付けて地理を絞る（"萩" だけだと全国の同名地にマッチするため）。
-  const keyword = [opts.prefecture, area, ...(opts.keywords ?? [])]
+  // 検索キーワードに入れる希望条件は温泉系のみ（名称/紹介文に載りやすく絞り込みが効く）。
+  // 朝食/夕食/駐車場/禁煙/駅近/Wi-Fi/送迎 はキーワードに入れると0件になり条件が無視されるので、
+  // キーワードには入れず、取得後の「並び順」で希望に合う宿を優先する。
+  const SEARCH_AMENITIES = new Set(['温泉', '露天風呂', '大浴場']);
+  const searchKw = (opts.keywords ?? []).map((s) => (s ?? '').trim()).filter((s) => SEARCH_AMENITIES.has(s));
+  const keyword = [opts.prefecture, area, ...searchKw]
     .map((s) => (s ?? '').trim())
     .filter(Boolean)
     .join(' ');
@@ -137,9 +142,10 @@ export async function rakutenHotelSearch(
     if (inPref.length) all = inPref;
   }
 
-  // ゲストハウス/ホステル/ドミトリー/カプセル等は宿泊先候補から除外する（ホテル・旅館を優先）。
-  // 名称と紹介文の両方で判定。全部除外で0件になるなら絞らない（候補ゼロを避ける）。
-  const EXCLUDE_LODGING = /ゲストハウス|ゲストイン|ホステル|hostel|guesthouse|guest house|ドミトリー|ドミトリ|カプセル|capsule|ライダーハウス/i;
+  // ゲストハウス/ホステル/ドミトリー/カプセル/キャンプ場/グランピング等は宿泊候補から除外する
+  // （ホテル・旅館を優先）。名称と紹介文の両方で判定。全部除外で0件になるなら絞らない。
+  const EXCLUDE_LODGING =
+    /ゲストハウス|ゲストイン|ホステル|hostel|guesthouse|guest house|ドミトリー|ドミトリ|カプセル|capsule|ライダーハウス|キャンプ|オートキャンプ|グランピング|glamping|バンガロー|テントサイト|コテージ村/i;
   const filtered = all.filter((h) => !EXCLUDE_LODGING.test(h.name) && !EXCLUDE_LODGING.test(h.why ?? ''));
   if (filtered.length) all = filtered;
 
@@ -158,13 +164,37 @@ export async function rakutenHotelSearch(
     }
   }
 
-  // 予算内に絞り、指定日の実価格があるホテルを優先しつつ料金の安い順（料金不明は後ろ）に
+  // 予算内に絞る。
   if (opts.maxPrice != null) {
     all = all.filter((h) => h.nightlyPrice == null || h.nightlyPrice <= opts.maxPrice!);
   }
+  // 希望条件（温泉・夕食付き等）に合う宿ほど上位に。名称・紹介文で判定（朝食/夕食/Wi-Fi等は表記揺れも吸収）。
+  const want = (opts.keywords ?? []).map((s) => (s ?? '').trim()).filter(Boolean);
+  const featureScore = (h: HotelOption): number => {
+    if (!want.length) return 0;
+    const hay = `${h.name} ${h.why ?? ''} ${h.area ?? ''}`;
+    let s = 0;
+    for (const f of want) {
+      if (f === '夕食付き') s += /夕食|会席|懐石|ディナー|食事付|2食|二食/.test(hay) ? 1 : 0;
+      else if (f === '朝食付き') s += /朝食|モーニング|バイキング|2食|二食/.test(hay) ? 1 : 0;
+      else if (f === '温泉') s += /温泉|名湯|の湯|湯処|♨/.test(hay) ? 1 : 0;
+      else if (f === 'Wi-Fi') s += /wi-?fi|無線|ネット/i.test(hay) ? 1 : 0;
+      else if (f === '駅近') s += /駅(から|より|徒歩|前|近|直結)/.test(hay) ? 1 : 0;
+      else if (f === '送迎') s += /送迎/.test(hay) ? 1 : 0;
+      else s += hay.includes(f) ? 1 : 0;
+    }
+    return s;
+  };
+  // 予算内で「口コミ評価の高い順」に並べる（希望条件に合う宿を優先しつつ）。
+  // 口コミが無い宿は評価0扱いで後ろへ（実績のある宿を上位に）。
+  const rating = (h: HotelOption): number => (h.reviewCount && h.reviewAverage ? h.reviewAverage : 0);
   all.sort((a, b) => {
-    if (!!a.datedPrice !== !!b.datedPrice) return a.datedPrice ? -1 : 1;
-    return (a.nightlyPrice ?? Infinity) - (b.nightlyPrice ?? Infinity);
+    const fs = featureScore(b) - featureScore(a); // 希望条件(温泉/夕食等)に合う宿を優先
+    if (fs !== 0) return fs;
+    const rv = rating(b) - rating(a); // 口コミ評価の高い順
+    if (rv !== 0) return rv;
+    if (!!a.datedPrice !== !!b.datedPrice) return a.datedPrice ? -1 : 1; // 指定日の実価格がある宿を優先
+    return (a.nightlyPrice ?? Infinity) - (b.nightlyPrice ?? Infinity); // 同点なら安い順
   });
   all = all.slice(0, limit);
 
@@ -176,6 +206,8 @@ function buildHotel(info: any): HotelOption {
   const bookingUrl = info.hotelNo
     ? `https://travel.rakuten.co.jp/HOTEL/${info.hotelNo}/${info.hotelNo}.html`
     : info.hotelInformationUrl || undefined;
+  const reviewAverage = typeof info.reviewAverage === 'number' ? info.reviewAverage : Number(info.reviewAverage) || undefined;
+  const reviewCount = typeof info.reviewCount === 'number' ? info.reviewCount : Number(info.reviewCount) || undefined;
   return {
     name: String(info.hotelName),
     area: addr || undefined,
@@ -183,6 +215,8 @@ function buildHotel(info: any): HotelOption {
     why: info.hotelSpecial ? String(info.hotelSpecial).slice(0, 80) : undefined,
     url: bookingUrl,
     hotelNo: typeof info.hotelNo === 'number' ? info.hotelNo : Number(info.hotelNo) || undefined,
+    reviewAverage: reviewAverage && reviewAverage > 0 ? reviewAverage : undefined,
+    reviewCount: reviewCount && reviewCount > 0 ? reviewCount : undefined,
   };
 }
 
