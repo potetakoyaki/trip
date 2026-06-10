@@ -116,4 +116,24 @@ describe('rakutenHotelSearch 楽天トラベル連携', () => {
     expect(names).not.toContain('みろく自然公園キャンプ場'); // キャンプ場は除外
     expect(r.hotels[0].name).toBe('さぬき温泉旅館'); // 温泉・夕食に合う宿が先頭
   });
+
+  it('予算内で口コミ評価の高い順に並べる', async () => {
+    const KW = {
+      hotels: [
+        { hotel: [{ hotelBasicInfo: { hotelName: '評価低い宿', hotelNo: 21, address1: '香川県', address2: '高松市', hotelMinCharge: 5000, reviewAverage: 3.2, reviewCount: 50 } }] },
+        { hotel: [{ hotelBasicInfo: { hotelName: '評価高い宿', hotelNo: 22, address1: '香川県', address2: '高松市', hotelMinCharge: 8000, reviewAverage: 4.7, reviewCount: 120 } }] },
+        { hotel: [{ hotelBasicInfo: { hotelName: '予算オーバー宿', hotelNo: 23, address1: '香川県', address2: '高松市', hotelMinCharge: 99000, reviewAverage: 5.0, reviewCount: 10 } }] },
+      ],
+      pagingInfo: { pageCount: 1 },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: any) => (String(url).includes('KeywordHotelSearch') ? mockRes(KW) : mockRes({}))),
+    );
+    const r = await rakutenHotelSearch(env(), '高松市', undefined, { maxPrice: 10000, limit: 10 });
+    const names = r.hotels.map((h) => h.name);
+    expect(names).not.toContain('予算オーバー宿'); // 予算外は除外
+    expect(r.hotels[0].name).toBe('評価高い宿'); // 口コミ評価の高い順
+    expect(r.hotels[0].reviewAverage).toBe(4.7);
+  });
 });

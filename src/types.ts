@@ -172,6 +172,10 @@ export interface HotelOption {
   hotelNo?: number;
   /** nightlyPrice が「指定した宿泊日の空室実価格」のとき true（未指定日の最低料金目安なら false）。 */
   datedPrice?: boolean;
+  /** 楽天の口コミ平均点（5点満点）。 */
+  reviewAverage?: number;
+  /** 楽天の口コミ件数。 */
+  reviewCount?: number;
 }
 
 /** 費用の内訳（円・1人あたり）。 */

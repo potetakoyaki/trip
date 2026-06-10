@@ -668,6 +668,14 @@ select:focus {
 .hotel-price.dated {
   color: var(--ok, #16a34a);
 }
+.hotel-review-row {
+  margin-top: 3px;
+}
+.hotel-review {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #b45309;
+}
 .hotel-area {
   font-size: 0.82rem;
   color: var(--muted);

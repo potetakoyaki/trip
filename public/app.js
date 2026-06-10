@@ -1888,6 +1888,10 @@ function renderHotels(hotels) {
       const priceLabel = h.datedPrice ? '/ 泊・室〜（指定日）' : '/ 泊〜（最低料金）';
       const checked = idx === selectedHotelIdx ? ' checked' : '';
       const extra = idx >= HOTELS_SHOWN ? ' hotel-extra hidden' : '';
+      const review =
+        h.reviewAverage && h.reviewCount
+          ? `<span class="hotel-review">⭐ ${h.reviewAverage.toFixed(2)}（${h.reviewCount}件）</span>`
+          : '';
       return `<div class="hotel${checked ? ' selected' : ''}${extra}" data-hotel="${idx}">
       <label class="hotel-pick"><input type="radio" name="hotelsel" class="hotel-radio" data-idx="${idx}"${checked}><span>この宿で計算</span></label>
       <div class="hotel-top"><span class="hotel-name">${name}</span>${
@@ -1895,6 +1899,7 @@ function renderHotels(hotels) {
           ? `<span class="hotel-price${h.datedPrice ? ' dated' : ''}">${yen(h.nightlyPrice)} ${priceLabel}</span>`
           : '<span class="hotel-price">料金不明</span>'
       }</div>
+      ${review ? `<div class="hotel-review-row">${review}</div>` : ''}
       ${h.area ? `<div class="hotel-area">📍 ${esc(h.area)}</div>` : ''}
       ${h.why ? `<div class="hotel-why">${esc(h.why)}</div>` : ''}
       <div class="hotel-actions">${link}</div>
@@ -1906,7 +1911,7 @@ function renderHotels(hotels) {
       ? `<button type="button" class="hotel-more" id="hotel-more-btn">▼ 他の${hotels.length - HOTELS_SHOWN}件を表示</button>`
       : '';
   return `<div class="info-card">
-    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・${anyDated ? '指定日の空室・' : ''}安い順／選んで滞在費に反映）</div>
+    <div class="info-h">🏨 宿泊の候補（${hotels.length}件・${anyDated ? '指定日の空室・' : ''}口コミ評価順／選んで滞在費に反映）</div>
     ${list}
     ${moreBtn}
     <p class="info-note">${

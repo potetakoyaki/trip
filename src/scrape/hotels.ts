@@ -185,11 +185,16 @@ export async function rakutenHotelSearch(
     }
     return s;
   };
+  // 予算内で「口コミ評価の高い順」に並べる（希望条件に合う宿を優先しつつ）。
+  // 口コミが無い宿は評価0扱いで後ろへ（実績のある宿を上位に）。
+  const rating = (h: HotelOption): number => (h.reviewCount && h.reviewAverage ? h.reviewAverage : 0);
   all.sort((a, b) => {
-    const fs = featureScore(b) - featureScore(a); // 希望条件に合う宿を優先
+    const fs = featureScore(b) - featureScore(a); // 希望条件(温泉/夕食等)に合う宿を優先
     if (fs !== 0) return fs;
+    const rv = rating(b) - rating(a); // 口コミ評価の高い順
+    if (rv !== 0) return rv;
     if (!!a.datedPrice !== !!b.datedPrice) return a.datedPrice ? -1 : 1; // 指定日の実価格がある宿を優先
-    return (a.nightlyPrice ?? Infinity) - (b.nightlyPrice ?? Infinity); // 安い順（料金不明は後ろ）
+    return (a.nightlyPrice ?? Infinity) - (b.nightlyPrice ?? Infinity); // 同点なら安い順
   });
   all = all.slice(0, limit);
 
@@ -201,6 +206,8 @@ function buildHotel(info: any): HotelOption {
   const bookingUrl = info.hotelNo
     ? `https://travel.rakuten.co.jp/HOTEL/${info.hotelNo}/${info.hotelNo}.html`
     : info.hotelInformationUrl || undefined;
+  const reviewAverage = typeof info.reviewAverage === 'number' ? info.reviewAverage : Number(info.reviewAverage) || undefined;
+  const reviewCount = typeof info.reviewCount === 'number' ? info.reviewCount : Number(info.reviewCount) || undefined;
   return {
     name: String(info.hotelName),
     area: addr || undefined,
@@ -208,6 +215,8 @@ function buildHotel(info: any): HotelOption {
     why: info.hotelSpecial ? String(info.hotelSpecial).slice(0, 80) : undefined,
     url: bookingUrl,
     hotelNo: typeof info.hotelNo === 'number' ? info.hotelNo : Number(info.hotelNo) || undefined,
+    reviewAverage: reviewAverage && reviewAverage > 0 ? reviewAverage : undefined,
+    reviewCount: reviewCount && reviewCount > 0 ? reviewCount : undefined,
   };
 }
 
