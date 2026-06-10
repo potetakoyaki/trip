@@ -563,11 +563,15 @@ export async function upsertEvents(
       e.price ?? null,
       e.hours ?? null,
       e.imageUrl ?? null,
-      e.raw ? JSON.stringify(e.raw).slice(0, 8000) : null,
+      e.raw ? JSON.stringify(e.raw).slice(0, 2000) : null,
       scrapedAt,
     ),
   );
-  await db.batch(batch);
+  // 一括 batch が大きすぎると D1 がタイムアウト（object reset）するので、小分けにして書き込む。
+  const CHUNK = 25;
+  for (let i = 0; i < batch.length; i += CHUNK) {
+    await db.batch(batch.slice(i, i + CHUNK));
+  }
   return events.length;
 }
 
