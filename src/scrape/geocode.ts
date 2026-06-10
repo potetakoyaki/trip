@@ -96,6 +96,28 @@ export async function reversePrefecture(env: Env, lat: number, lng: number): Pro
   }
 }
 
+/**
+ * 緯度経度から「都道府県＋市区町村」の地名（例 "東京都新宿区"）を逆ジオコーディングで得る。
+ * 「現在地を出発地に使う」機能用。市区町村が取れなければ都道府県のみ。失敗時 undefined。
+ */
+export async function reversePlaceName(env: Env, lat: number, lng: number): Promise<string | undefined> {
+  try {
+    const ua = env.USER_AGENT || 'TripPlannerBot/0.1 (personal use)';
+    const url = `${NOMINATIM_REVERSE}?lat=${lat}&lon=${lng}&format=json&accept-language=ja&zoom=14&addressdetails=1`;
+    const res = await fetch(url, { headers: { 'User-Agent': ua, Accept: 'application/json' } });
+    await sleep(1100);
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as any;
+    const a = data?.address ?? {};
+    const pref = (a.province || a.state || a.region || '').toString().trim();
+    const city = (a.city || a.town || a.village || a.county || a.suburb || '').toString().trim();
+    const name = `${pref}${city}`.trim();
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** 2地点の直線距離(km)。ハバーサイン。 */
 export function haversineKm(a: LatLng, b: LatLng): number {
   const R = 6371;

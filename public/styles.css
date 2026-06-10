@@ -144,6 +144,21 @@ main {
 .field {
   margin-bottom: 18px;
 }
+.geo-btn {
+  margin-top: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--brand-ink);
+  background: #faf4e1;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.geo-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
