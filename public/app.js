@@ -1137,6 +1137,9 @@ function genFromWishlist() {
 function refinePlan(instruction) {
   if (!currentPlan) return;
   pendingRefine = instruction;
+  // 調整指示は反映後に残さない（再作成後も古い文言が入ったままにならないようクリア）。
+  const ri = $('refine-input');
+  if (ri) ri.value = '';
   startPlan();
 }
 

@@ -63,16 +63,8 @@ export async function geocodePlanItems(
   const center = opts.center ?? null;
   const maxKm = opts.maxKm ?? 150;
   for (const item of items) {
-    // 既に座標があり、エリア中心の近傍ならそのまま信頼して使う。
-    // Nominatim(1req/秒)の問い合わせを省けるので大幅に速くなる（誤った遠方座標だけ引き直す）。
-    if (
-      center &&
-      item.lat != null &&
-      item.lng != null &&
-      haversineKm(center, { lat: item.lat, lng: item.lng }) <= maxKm
-    ) {
-      continue;
-    }
+    // 各スポットの実座標を名称から引き直す（AIの座標は海上等にズレることがあるため信頼しない）。
+    // DBキャッシュがあれば即返るので、同じスポットの2回目以降は速い。
     const ll = await geocodeQuery(env, item.title || '', item.location || areaHint);
     // エリア中心から離れすぎ（＝別地方の同名地に誤マッチ）や取得失敗は地図に出さない。
     if (ll && (!center || haversineKm(center, ll) <= maxKm)) {
