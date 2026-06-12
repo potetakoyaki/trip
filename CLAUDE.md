@@ -30,6 +30,7 @@
 - このユーザーの Gemini キー実測: `gemini-2.0-flash`/`-lite` は free_tier `limit:0`（不可）、`2.5-flash`=5RPM、`2.5-flash-lite`=15RPM。**2.0系は使わない**。
 
 ## 主要ディレクトリ / ファイル
+- `.claude/skills/scrape-source/` — **収集ソース追加/デバッグのSkill**（手順＋ハマりどころ集＋JSON-LD確認スクリプト）。楽天/walkerplus/Jina/Nominatim/D1/AIの作業時に参照（`/scrape-source` でも呼べる）。
 - `src/index.ts` — Worker エントリ。Cron（毎分=収集キュー / 6h=定期スクレイプ）。
 - `src/api/routes.ts` — 全APIルート（`/plan/start` `/plan-status` `/collect/start` `/places` `/diag/ai` `/areas/similar` 等）。
 - `src/planner/create-plan.ts` — プラン作成の中核（収集→候補→ホテル→AI生成→ジオコーディング→交通→保存）。**進捗 `onProgress` を各段階で呼ぶ**。

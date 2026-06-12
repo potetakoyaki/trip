@@ -48,6 +48,22 @@ async function api(path, options) {
   return data;
 }
 
+// ネットワーク失敗(Failed to fetch等)のみ自動再試行する。モバイル回線で長めのAI処理中に
+// 一時的に切れても、もう一度取りに行く。HTTPエラー(4xx/5xx)は即throw（無駄な再試行をしない）。
+async function apiRetry(path, options, tries = 3) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await api(path, options);
+    } catch (e) {
+      lastErr = e;
+      if (!/Failed to fetch|NetworkError|load failed|Load failed/i.test(e.message || '')) throw e;
+      await new Promise((r) => setTimeout(r, 700 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 // --- 行ったことある場所（visited） ---
 async function loadVisited() {
   try {
@@ -866,10 +882,11 @@ async function suggestConceptsFlow(exclude) {
   selectedConcept = null;
   setBusy(true);
   $('result').classList.add('hidden');
+  clearSuggestBox(); // 再考時に古いテーマを残さない
   showIndet('AIが旅の方向性を考えています…');
   setStatus('条件に合う「旅のテーマ」をAIが考えています…', '');
   try {
-    const r = await api('/suggest-concepts', {
+    const r = await apiRetry('/suggest-concepts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -884,8 +901,32 @@ async function suggestConceptsFlow(exclude) {
   } catch (e) {
     hideProgressBar();
     setBusy(false);
-    setStatus('テーマの提案に失敗しました: ' + e.message, 'err');
+    renderSuggestError('テーマの提案に失敗しました', () => suggestConceptsFlow(exclude));
   }
+}
+
+// 提案エリアを空にして隠す（再考・再提案の前に古い内容を消すため）。
+function clearSuggestBox() {
+  const box = $('suggest-results');
+  if (box) {
+    box.innerHTML = '';
+    box.classList.add('hidden');
+  }
+}
+
+// 通信失敗時に「もう一度」ボタンを提案エリアに出す（古い案は残さず、再試行できるように）。
+function renderSuggestError(title, retryFn) {
+  const box = $('suggest-results');
+  if (!box) return;
+  setStatus('通信に失敗しました。電波の良い場所でもう一度お試しください。', 'err');
+  box.innerHTML =
+    `<div class="suggest-h">⚠️ ${esc(title)}</div>` +
+    `<p class="suggest-reason">通信が不安定だった可能性があります。もう一度お試しください。</p>` +
+    `<button type="button" id="suggest-retry" class="btn-secondary suggest-again">🔄 もう一度</button>`;
+  box.classList.remove('hidden');
+  const b = $('suggest-retry');
+  if (b) b.addEventListener('click', retryFn);
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderConcepts(concepts) {
@@ -939,13 +980,14 @@ async function suggestAreasFlow(exclude) {
   if (selectedConcept) body.concept = selectedConcept; // 選んだテーマに合う行き先を出す
   setBusy(true);
   $('result').classList.add('hidden'); // 行き先を選び直すので前回プランは画面に残さない
+  clearSuggestBox(); // 再考時に古い行き先を残さない
   showIndet(exclude && exclude.length ? 'AIが別の行き先を考えています…' : 'AIが行き先を考えています…');
   setStatus(
     selectedConcept ? `「${selectedConcept}」に合う行き先をAIが考えています…` : '条件に合う行き先をAIが3案考えています…',
     '',
   );
   try {
-    const r = await api('/suggest-areas', {
+    const r = await apiRetry('/suggest-areas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -961,7 +1003,7 @@ async function suggestAreasFlow(exclude) {
   } catch (e) {
     hideProgressBar();
     setBusy(false);
-    setStatus('行き先の提案に失敗しました: ' + e.message, 'err');
+    renderSuggestError('行き先の提案に失敗しました', () => suggestAreasFlow(exclude));
   }
 }
 
